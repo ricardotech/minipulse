@@ -8,7 +8,13 @@ GitHub releases.
 
 ### Added
 - Release tarballs now ship a `.sha256` checksum file next to each
-  download so binaries can be verified (`shasum -a 256 -c …`).
+  download so the tarball's integrity can be checked
+  (`shasum -a 256 -c …`). This is corruption detection, not a
+  signature; signed binaries remain on the roadmap.
+
+### Fixed
+- `disk_scan_interval_minutes: 0` is now truly "on demand only": the
+  boot-time catch-up scan no longer runs in that mode.
 
 ### Changed
 - Positioning: MiniPulse is for **any** Apple Silicon Mac — everyday
@@ -20,7 +26,8 @@ GitHub releases.
 ### Security
 - `launchctl` is now invoked via its absolute path (`/bin/launchctl`),
   like `lsof`/`scutil` already were — system tools are never resolved
-  through `PATH`.
+  through `PATH` (`macmon`, a third-party binary, still is, as
+  documented in SECURITY.md).
 - CI workflow runs with `contents: read` permissions only.
 
 ## [0.2.0] — 2026-10-30

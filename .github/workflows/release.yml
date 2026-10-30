@@ -9,6 +9,9 @@ permissions:
 jobs:
   build:
     strategy:
+      # Both jobs create/edit the same release; run them sequentially
+      # so they can't race each other on the tag.
+      max-parallel: 1
       matrix:
         include:
           - runner: macos-latest # Apple Silicon

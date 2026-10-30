@@ -27,7 +27,7 @@ minipulse service install   # launchd: starts at login, restarts on crash
 
 Open **http://127.0.0.1:8848**. That's it — no accounts, no cloud, no sudo.
 
-No Go toolchain? Download a binary from [Releases](https://github.com/ricardotech/minipulse/releases) and verify it against the `.sha256` file published next to it (`shasum -a 256 -c minipulse-*.sha256`). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`. Prefer not to? `go install` above builds from source and skips quarantine entirely.
+No Go toolchain? Download a tarball from [Releases](https://github.com/ricardotech/minipulse/releases); each ships a `.sha256` file so you can check the download isn't corrupted (`shasum -a 256 -c minipulse-*.sha256` — an integrity check, not a signature). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`. Prefer not to? `go install` above builds from source and skips quarantine entirely.
 
 ## Why?
 
@@ -40,7 +40,7 @@ A base-model Mac mini is now the home server of choice: ~5 W idle, silent, and f
 
 MiniPulse is built for exactly that machine: a headless mini you want to watch from your laptop or phone, over your own network, with history and alerts — and nothing leaving the house. The landscape survey behind these choices, exact same-name aggregation semantics included, is in [docs/RESEARCH.md](docs/RESEARCH.md).
 
-**Not just for servers.** The same questions hit an everyday MacBook or iMac: *why is the fan spinning and the battery draining — which process, and since when?* (process history + spike events) and *my disk filled up again — which cache grew, Xcode's DerivedData, Docker images, a browser cache, an Ollama model?* (the "what grew" diff). MiniPulse is **read-only**: it tells you what and where, and never deletes anything — you stay in charge of the cleanup. On a laptop, consider `disk_scan_interval_minutes: 0` (scan on demand from the dashboard) so a full home-directory walk never competes with your battery.
+**Not just for servers.** The same questions hit an everyday MacBook or iMac: *why is the fan spinning and the battery draining — which process, and since when?* (process history + spike events) and *my disk filled up again — which cache grew, Xcode's DerivedData, Docker images, a browser cache, an Ollama model?* (the "what grew" diff). MiniPulse is **read-only** towards your data: it tells you what and where, and never deletes your files — you stay in charge of the cleanup. On a laptop, consider `disk_scan_interval_minutes: 0` (scan on demand from the dashboard) so a full home-directory walk never competes with your battery.
 
 ## Features
 
@@ -181,9 +181,9 @@ flowchart LR
 
 **Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
 
-**Does MiniPulse clean or delete anything?** Never. It is a read-only observer: no file is moved, emptied or deleted, and the only state-changing API call is "rescan the disk now". When the disk view points at a 30 GB cache, deleting it (or not) is your call — see [SECURITY.md](SECURITY.md) for the full threat model.
+**Does MiniPulse clean or delete anything?** Never touches your files. It is a read-only observer of your data: no file of yours is moved, emptied or deleted, and the only state-changing API call is "rescan the disk now". (It does write to — and prune old rows from — its own local SQLite database.) When the disk view points at a 30 GB cache, deleting it (or not) is your call — see [SECURITY.md](SECURITY.md) for the full threat model.
 
-**Will the disk scans hurt my SSD or battery?** A scan is a metadata walk (names and sizes, symlink-safe), the same reads `du` makes — no writes to your files. It does cost CPU while it runs, so on a laptop set `disk_scan_interval_minutes: 0` and rescan on demand; on an always-plugged-in Mac the hourly default is fine. Restarts never trigger a redundant rescan while the last one is still fresh.
+**Will the disk scans hurt my SSD or battery?** A scan is a metadata walk (names and sizes, symlink-safe), the same reads `du` makes — no writes to your files. It does cost CPU while it runs, so on a laptop set `disk_scan_interval_minutes: 0` (then not even the boot-time catch-up scan runs) and rescan on demand; on an always-plugged-in Mac the hourly default is fine. Restarts never trigger a redundant rescan while every root's last scan is still fresh.
 
 ## Development
 

@@ -4,7 +4,18 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/ricardotech/minipulse/internal/config"
 )
+
+func TestScansStaleOnDemandOnly(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DiskScanIntervalMinutes = 0 // documented as "on demand only"
+	c := &Collector{cfg: cfg}       // nil store: must return before touching it
+	if c.scansStale() {
+		t.Error("interval 0 must never trigger a boot scan")
+	}
+}
 
 // One real line captured from `macmon pipe` 0.10 on an Apple M6.
 const macmonSample = `{"all_power":0.17742818593978882,"ane_power":0.0,"cpu_power":0.15622924268245697,"cpu_tiers":[{"active_ratio":0.11169984191656113,"cores":[{"active_ratio":0.24637316167354584,"core_id":0,"die_id":0,"freq_mhz":1198,"scaled_ratio":0.1}],"freq_mhz":1284,"label":"E","scaled_ratio":0.047}],"fans":[{"max_rpm":4900,"name":"fan0","rpm":999}],"gpu_power":0.021198948845267296,"gpu_ram_power":0.0,"memory":{"ram_total":17179869184,"ram_usage":10640392192,"swap_total":0,"swap_usage":0},"ram_power":0.0,"sys_power":19.483932495117188,"temp":{"cpu_temp_avg":38.75801467895508,"gpu_temp_avg":38.63107681274414},"timestamp":"2026-10-30T20:59:15.630084+00:00"}`

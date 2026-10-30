@@ -242,9 +242,13 @@ func (c *Collector) scanOne(root string) {
 }
 
 // scansStale reports whether any configured root lacks a scan newer
-// than the configured interval.
+// than the configured interval. Interval 0 means "on demand only":
+// not even the boot-time catch-up scan runs.
 func (c *Collector) scansStale() bool {
 	interval := time.Duration(c.cfg.DiskScanIntervalMinutes) * time.Minute
+	if interval <= 0 {
+		return false
+	}
 	for _, root := range c.cfg.DiskScanRoots {
 		latest, err := c.store.LatestScan(root)
 		if err != nil || latest == nil {
