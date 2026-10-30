@@ -218,14 +218,33 @@ func (c *Collector) scanOne(root string) {
 	debug.FreeOSMemory()
 }
 
+// scansStale reports whether any configured root lacks a scan newer
+// than the configured interval.
+func (c *Collector) scansStale() bool {
+	interval := time.Duration(c.cfg.DiskScanIntervalMinutes) * time.Minute
+	for _, root := range c.cfg.DiskScanRoots {
+		latest, err := c.store.LatestScan(root)
+		if err != nil || latest == nil {
+			return true
+		}
+		if interval > 0 && time.Since(latest.Time) > interval {
+			return true
+		}
+	}
+	return false
+}
+
 func (c *Collector) diskLoop(ctx context.Context) {
-	// First scan soon after boot so the disk page has data, then on cadence.
+	// Scan soon after boot only when the newest scan is missing or
+	// stale — restarting the agent must not re-walk millions of files.
 	select {
 	case <-ctx.Done():
 		return
 	case <-time.After(15 * time.Second):
 	}
-	c.TriggerScan()
+	if c.scansStale() {
+		c.TriggerScan()
+	}
 	every := time.Duration(c.cfg.DiskScanIntervalMinutes) * time.Minute
 	if every <= 0 {
 		return
