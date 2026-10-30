@@ -1,173 +1,182 @@
-# MiniPulse
+<p align="center">
+  <h1 align="center">MiniPulse</h1>
+  <p align="center"><strong>The heartbeat of your Mac mini server.</strong><br>
+  A tiny, always-on web dashboard for a Mac mini (or any Apple Silicon Mac) running as a home server:<br>
+  live watts &amp; energy cost, CPU/RAM history, the processes behind them, and where your disk is going.</p>
+  <p align="center">
+    <a href="https://github.com/ricardotech/minipulse/actions/workflows/ci.yml"><img src="https://github.com/ricardotech/minipulse/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+    <a href="https://github.com/ricardotech/minipulse/releases"><img src="https://img.shields.io/github/v/release/ricardotech/minipulse" alt="Latest release"></a>
+    <a href="https://github.com/ricardotech/minipulse/blob/main/LICENSE"><img src="https://img.shields.io/github/license/ricardotech/minipulse" alt="MIT license"></a>
+    <img src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go" alt="Go 1.27">
+    <img src="https://img.shields.io/badge/macOS-Apple_Silicon-black?logo=apple" alt="macOS Apple Silicon">
+  </p>
+</p>
 
-**A tiny, always-on dashboard for a Mac mini (or any Apple Silicon Mac) used as a home server.**
+![MiniPulse dashboard — live watts, per-core CPU, memory, storage and the disk deep-dive running on a Mac mini M6](docs/dashboard.png)
 
-Live **power draw in watts** with energy cost, CPU/RAM/thermals, a deep
-**"where is my disk going?"** view that shows what *grew*, Docker
-containers, listening ports, launchd services, health checks and alerts —
-in one small Go binary, no sudo, no cloud account, no Electron.
+## Quick start
 
-![MiniPulse dashboard](docs/dashboard.png)
-
-## Why?
-
-A base-model Mac mini is now the home server of choice: ~5 W idle,
-silent, and fast enough for Plex, Home Assistant, Docker stacks and
-local LLMs. But monitoring one is surprisingly awkward:
-
-- **Menu-bar tools** (Stats, iStat Menus) are great on a desktop, but a
-  server mini runs *headless* — nobody is logged in to see a menu bar.
-  Their remote modes stream your metrics to a third-party cloud.
-- **Generic server dashboards** (Glances, Netdata, Beszel) don't know
-  Apple Silicon exists: no watts, no Neural Engine, no E/P cores.
-- **Power** is the #1 question mini-server owners ask ("what does it
-  cost to run 24/7?") and most answer it with a smart plug, because
-  software either requires `sudo powermetrics` or shows no history/cost.
-- **Storage** is the #2 pain: the base mini has 256 GB, and macOS
-  answers "what's eating it?" with a grey *System Data* bar of 100 GB+.
-  Caches, Docker images, Ollama models and AI coding tools grow silently
-  until the disk is full at 3 a.m.
-
-MiniPulse is built for exactly that machine: a headless mini you want
-to check from your phone, over your own network (localhost or
-Tailscale), with history and alerts — and nothing leaving the house.
-
-See [docs/RESEARCH.md](docs/RESEARCH.md) for the landscape survey behind
-these choices, including the excellent existing tools we build on.
-
-## Features
-
-- ⚡ **Real watts, no sudo** — whole-system + CPU/GPU/ANE power,
-  temperatures, fan RPM and per-core E/P/S activity, via
-  [macmon](https://github.com/vladkens/macmon)'s `pipe` mode.
-- 🔌 **Energy & cost** — kWh today / 7 days / month, cost in your
-  currency at your tariff, peak & average draw, optional CO₂.
-- 💾 **Where is the disk going?** — scheduled scans of any roots
-  (home, external SSDs, `/Applications`…): browse biggest-first,
-  see **what grew since the last scan**, and the largest files overall.
-- 📈 **History** — every sample in a local SQLite file (30 days by
-  default); charts for power, CPU, RAM, network and disk I/O.
-- 🐳 **Containers** — Docker Desktop / OrbStack / Colima containers with
-  live CPU & memory.
-- 🛰️ **Services** — launchd jobs, listening TCP ports, and HTTP health
-  checks you configure.
-- 🔔 **Alerts without a cloud** — disk %, CPU temperature, RAM, watts and
-  health-check failures to an [ntfy](https://ntfy.sh) topic or any webhook.
-- 🔒 **Private by design** — binds to `127.0.0.1` by default; refuses to
-  listen on a LAN address without a token. Serves a Prometheus
-  `/metrics` endpoint if you already run Grafana.
-- 🪶 **Small** — one static-ish Go binary, embedded UI (vanilla JS, works
-  offline), installed as a `launchd` agent in one command. On the
-  author's mini it idles at ~0.5% CPU sampling every 2 s.
-
-## Install
-
-Requirements: an Apple Silicon Mac, macOS 13+, and
-[macmon](https://brew.sh) for power metrics (everything else works
-without it — the dashboard just shows watts as unavailable).
+**Requirements:** an Apple Silicon Mac, macOS 13+, and [macmon](https://github.com/vladkens/macmon) for the live wattage (everything else works without it).
 
 ```sh
 brew install macmon
 go install github.com/ricardotech/minipulse/cmd/minipulse@latest
-minipulse            # serves http://127.0.0.1:8848
+minipulse service install   # launchd: starts at login, restarts on crash
 ```
 
-No Go toolchain? Grab a binary from
-[Releases](https://github.com/ricardotech/minipulse/releases), or build
-from source:
+Open **http://127.0.0.1:8848**. That's it — no accounts, no cloud, no sudo.
 
-```sh
-git clone https://github.com/ricardotech/minipulse
-cd minipulse && make run
-```
+No Go toolchain? Download a binary from [Releases](https://github.com/ricardotech/minipulse/releases). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`.
 
-### Run it forever (launchd)
+## Why?
 
-```sh
-minipulse service install     # starts at login, restarts on crash
-minipulse service status
-minipulse service uninstall
-```
+A base-model Mac mini is now the home server of choice: ~5 W idle, silent, and fast enough for Plex, Home Assistant, Docker stacks and local LLMs. But monitoring one is surprisingly awkward:
 
-Logs land in `~/Library/Logs/minipulse/`.
+- **Menu-bar tools** (Stats, iStat Menus) are great on a desktop, but a server mini runs *headless* — nobody is logged in to see a menu bar. Their remote modes stream your metrics to a third-party cloud.
+- **Generic server dashboards** (Glances, Netdata, Beszel, node_exporter) don't know Apple Silicon exists: no watts, no Neural Engine, no E/P cores, nothing temperature.
+- **Power** is the #1 question mini-server owners ask ("what does 24/7 cost me?") and most answer it with a smart plug, because software either needs `sudo powermetrics` or keeps no history.
+- **Storage** is the #2 pain: the base mini has 256 GB, and macOS answers "what's eating it?" with a grey *System Data* bar of 100 GB+. Caches, Docker images, Ollama models and AI tools grow silently until the disk is full at 3 a.m.
 
-### See it from your phone (Tailscale)
+MiniPulse is built for exactly that machine: a headless mini you want to watch from your laptop or phone, over your own network, with history and alerts — and nothing leaving the house. The landscape survey behind these choices, exact same-name aggregation semantics included, is in [docs/RESEARCH.md](docs/RESEARCH.md).
 
-Keep MiniPulse on loopback and publish it only to your tailnet:
+## Features
+
+- ⚡ **Live watts without sudo** — whole-system + CPU/GPU/ANE power, temperatures, fan, and per-core E/P/S activity, via [macmon](https://github.com/vladkens/macmon)'s `pipe` mode (the same IOReport data `powermetrics` uses, unprivileged).
+- 🔌 **Energy & cost accounting** — kWh today, 7 days, month; cost in your currency at your tariff; average and peak draw; optional CO₂. The cumulative counter survives restarts.
+- 🧩 **Processes behind the percentages** — click the CPU or Memory card for a detail drawer: live top processes with bars, plus a *History* tab with an area chart of the top consumers over time, leader boards (average/peak, and *when* the peak happened), and click-the-chart snapshots — "what was eating the machine at 14:03?". Instances that share a name (e.g. all Chrome helpers) are summed. CPU % is per-core: 100% = one full core.
+- 📜 **A light consumption log** — top consumers sampled every 30 s (kept 14 days by default), plus automatic *process spike* events when something pins 2+ cores. Everything in one local SQLite file.
+- 💾 **Where is the disk going?** — scheduled scans of any roots: browse biggest-first, see **what grew since the last scan**, and the biggest files overall.
+- 🐳 **Containers & services** — Docker Desktop / OrbStack / Colima containers, launchd jobs, listening TCP ports, and HTTP health checks.
+
+![Per-process history — top CPU consumers stacked over the last hour, with leaders, peaks and click-to-view snapshots](docs/process-history.png)
+
+![Disk growth — what grew since the previous scan, biggest changes first](docs/disk-growth.png)
+
+- 🔔 **Alerts without a cloud** — disk %, CPU temperature, RAM, power draw and failed health checks to an [ntfy](https://ntfy.sh) topic or any webhook; sustained per-process CPU spikes are logged as events. Cooldowns included; there is no vendor account and no telemetry.
+- 🔒 **Private by design** — binds `127.0.0.1` by default and *refuses* to listen on a LAN address without a token. CSP/nosniff/frame headers, owner-only data dir, token via `minipulse token`. See [SECURITY.md](SECURITY.md) for the threat model.
+- 📈 **History & Prometheus** — every sample stored locally (samples 30 days by default); a Prometheus endpoint at `/metrics` composes with your existing Grafana instead of replacing it.
+- 🪶 **Small** — one Go binary, an embedded vanilla-JS UI (no build step, works offline), ~20 MB RAM and ~0.3% CPU idle on the author's mini.
+
+<p align="center"><img src="docs/mobile.png" alt="MiniPulse at phone size — the sidebar collapses to a top strip" width="320"></p>
+
+## How MiniPulse compares
+
+| | MiniPulse | Stats | macmon | Beszel / Glances |
+|---|---|---|---|---|
+| Form | headless daemon + web UI | menu-bar app | terminal UI / JSON | web dashboard |
+| Apple Silicon watts, no sudo | ✅ (via macmon) | ✅ | ✅ | ❌ |
+| Energy cost over time | ✅ | ❌ | ❌ | ❌ |
+| Works with nobody logged in | ✅ | ❌ GUI session | partial | ✅ |
+| Per-process history (who ate CPU at 14:03) | ✅ | ❌ | live list only | limited |
+| Disk growth diff ("what grew") | ✅ | ❌ | ❌ | usage only |
+| Containers / launchd / ports | ✅ | ❌ | ❌ | containers only |
+| Your metrics leave the house | never | remote mode: vendor cloud | never | self-hosted |
+
+MiniPulse is deliberately *not* a menu-bar app, fan controller, or multi-OS fleet manager — neighbours do those better. It is the one box above, watched well.
+
+## See it from your phone (Tailscale)
+
+Keep MiniPulse on loopback and publish it only inside your tailnet:
 
 ```sh
 tailscale serve --bg 8848
 # → https://<your-mini>.<tailnet>.ts.net
 ```
 
-To bind a LAN address instead, set `"token"` in the config first
-(`minipulse token` generates one) — MiniPulse refuses to start on a
-non-loopback address without it. Open the dashboard once with
-`?token=…` and it sets a cookie.
+For a plain LAN bind instead, generate a token first (`minipulse token`), put it in the config, then open the dashboard once with `?token=…` (it becomes a cookie). MiniPulse refuses to start on a non-loopback address with no token unless you pass `--insecure-no-auth`.
 
 ## Configuration
 
-Optional — defaults work out of the box. To customize:
-
-```sh
-minipulse init-config   # writes ~/.config/minipulse/config.json
-```
+Optional — the defaults work out of the box. Generate a file with `minipulse init-config` (written to `~/.config/minipulse/config.json`, mode `0600`).
 
 | Field | Default | Meaning |
 |---|---|---|
 | `addr` | `127.0.0.1:8848` | listen address |
 | `token` | *(none)* | API token (required off-loopback) |
 | `sample_interval_seconds` | `2` | metrics cadence |
-| `retention_days` | `30` | history kept in SQLite |
+| `retention_days` | `30` | sample history kept |
+| `process_sample_interval_seconds` | `30` | top-process snapshot cadence (`0` disables history) |
+| `process_top_n` | `10` | per ranking kept per snapshot (CPU ∪ RAM) |
+| `process_retention_days` | `14` | process history kept |
+| `alert_process_cpu_pct` | `200` | log a spike event above this % sustained |
 | `energy_price_per_kwh` / `currency` | `0.15` / `USD` | your electricity tariff |
+| `grid_co2_per_kwh` | `0` | set to show CO₂ estimates |
 | `disk_scan_roots` | `["~"]` | directories to walk (add `/Volumes/…`, `/Applications`) |
-| `disk_scan_interval_minutes` | `60` | scan cadence (`0` = only on demand) |
+| `disk_scan_interval_minutes` | `60` | scan cadence (`0` = on demand only) |
 | `disk_min_entry_bytes` | `10485760` | smaller entries are aggregated, not stored |
-| `health_checks` | `[]` | `[{name, url, expect_status?}]` polled every 30 s |
-| `alert_disk_pct` / `alert_cpu_temp_c` / `alert_mem_pct` / `alert_watts` | `85`/`95`/`92`/`0` | thresholds (`0` disables) |
-| `alert_webhook_url` | *(none)* | ntfy topic URL or webhook |
+| `health_checks` | `[]` | `[{name, url, expect_status?}]`, polled every 30 s |
+| `alert_disk_pct` / `alert_cpu_temp_c` / `alert_mem_pct` / `alert_watts` | `85` / `95` / `92` / `0` | thresholds (`0` disables) |
+| `alert_webhook_url` | *(none)* | ntfy topic URL or generic webhook |
 | `alert_cooldown_minutes` | `30` | repeat interval while a rule keeps firing |
 
-Data lives in `~/.local/share/minipulse/minipulse.db` (SQLite, WAL).
+Data lives in `~/.local/share/minipulse/` (owner-only). On the author's mini — 2 s samples, process snapshots every 30 s, disk scans of home + a 1 TB SSD — the database sits in the tens of MB.
 
 ## CLI
 
 ```sh
 minipulse                      # serve in the foreground
-minipulse scan [--top 25] [paths…]   # one-off disk scan: biggest first
 minipulse service install|uninstall|status
+minipulse scan [--top 25] [paths…]   # one-off disk scan, biggest first
 minipulse token                # print a random API token
 minipulse init-config
 minipulse version
 ```
 
+Logs from the launchd service land in `~/Library/Logs/minipulse/`.
+
 ## HTTP API
 
-Everything the UI shows, as JSON (plus a live SSE stream):
+Everything the UI shows, as JSON, plus a live SSE stream:
 
-```
-GET  /api/overview      host + latest sample + energy today
-GET  /api/stream        SSE: one event per sample (server-paced)
-GET  /api/history?range=1h|6h|24h|7d|30d
-GET  /api/processes?sort=mem|cpu&limit=15
-GET  /api/energy?range=today|7d|month
-GET  /api/disk?root=&view=tree|growth|biggest&parent=
-POST /api/disk/scan     trigger a rescan
-GET  /api/containers    Docker / OrbStack / Colima
-GET  /api/services      launchd jobs + listening ports + health
-GET  /api/events        alert/event log
-GET  /metrics           Prometheus text
-GET  /healthz
-```
+| Endpoint | What |
+|---|---|
+| `GET /api/overview` | host info + latest sample + energy today |
+| `GET /api/stream` | SSE — one event per sample, server-paced |
+| `GET /api/history?range=1h\|6h\|24h\|7d\|30d` | bucketed system history |
+| `GET /api/processes?sort=mem\|cpu&limit=15` | live top processes (CPU % per core: 100 = 1 core) |
+| `GET /api/processes/history?range=&sort=&limit=` | leaders + stacked series |
+| `GET /api/processes/at?ts=<unix\|RFC3339>` | stored snapshot nearest that moment |
+| `GET /api/energy?range=today\|7d\|month` | kWh, cost, avg/peak, per-day |
+| `GET /api/disk?root=&view=tree\|growth\|biggest&parent=` | disk deep-dive |
+| `POST /api/disk/scan` | trigger a rescan |
+| `GET /api/containers` · `GET /api/services` · `GET /api/events` | Docker, launchd+ports+health, event log |
+| `GET /metrics` · `GET /healthz` | Prometheus text · liveness |
 
 ## How watts work without sudo
 
-`powermetrics` needs root, which is a non-starter for an always-on
-agent. [macmon](https://github.com/vladkens/macmon) reads the same
-underlying IOReport data through a private-but-unprivileged API.
-MiniPulse runs `macmon pipe` as a child process and parses its JSON
-stream — credit and thanks to the macmon project; MiniPulse adds the
-history, cost accounting, disk deep-dive, services and alerts around it.
+`powermetrics` requires root — a non-starter for an always-on agent. [macmon](https://github.com/vladkens/macmon) reads the same underlying IOReport data through a private but unprivileged API. MiniPulse runs `macmon pipe` as a child process and parses its JSON stream; if macmon isn't installed, one line on the dashboard says so and everything else still works.
+
+Per-process CPU, like `ps`, is computed by diffing cumulative CPU time between process walks — a true current rate. A process seen for the first time that was born since the previous walk reports its since-birth average, so a stacked peak during heavy short-lived process churn (compilers, CI helpers) can briefly overstate the instantaneous total.
+
+## Architecture
+
+```mermaid
+flowchart LR
+  macmon["macmon pipe<br>(watts, temps, fan)"] --> C["collector<br>2 s samples"]
+  gopsutil["gopsutil<br>cpu · mem · net · disk · processes"] --> C
+  C --> DB[("SQLite<br>samples · process snapshots<br>disk scans · events")]
+  C --> A["alerts<br>ntfy / webhook"]
+  C --> API["HTTP API + SSE<br>:8848"]
+  DB --> API
+  API --> UI["embedded web UI<br>vanilla JS, offline"]
+  API --> P["/metrics<br>Prometheus"]
+```
+
+## FAQ
+
+**Does it work on Intel Macs?** The dashboard runs, but Apple Silicon is the point: no watts/ANE/tiers on Intel (macmon is Apple Silicon-only).
+
+**A process shows 250% CPU. Bug?** No — CPU % is per core, like `top`: 100% is one full core, so a multi-threaded app on a 12-core mini can reach 1200%. In History, instances sharing a name are summed ("all of Chrome").
+
+**Process History is empty right after install.** Expected: snapshots land every 30 s by default, so the first points appear within a minute and the window fills as time passes. Set `process_sample_interval_seconds` lower if you want denser history (it costs a process walk per sample).
+
+**How much disk does the history take?** Roughly: system samples every 2 s ≈ a few MB/week, process snapshots every 30 s ≈ 3–5 MB/day before the 14-day retention prune, and disk-scan entries depend on your roots (entries under 10 MiB aren't stored). The author's full database is ~30 MB.
+
+**Does MiniPulse phone home?** Never. The only outbound calls are health checks and alert webhooks that *you* configure. The UI is embedded and works fully offline.
+
+**How do I uninstall?** `minipulse service uninstall`, delete the binary, `~/.local/share/minipulse/`, `~/.config/minipulse/` and `~/Library/Logs/minipulse/`.
+
+**Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac mini's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
 
 ## Development
 
@@ -177,22 +186,18 @@ make build   # ./minipulse
 make run     # build & serve on :8848
 ```
 
-The codebase is deliberately boring: stdlib HTTP, one metrics library
-(gopsutil), one SQLite driver, no web build step (the UI is three
-static files embedded with `go:embed`). See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+The codebase is deliberately boring: stdlib HTTP, one metrics library (gopsutil), one SQLite driver, zero build step for the UI (three static files via `go:embed`). Package layout and ground rules in [CONTRIBUTING.md](CONTRIBUTING.md); security model and reporting in [SECURITY.md](SECURITY.md); version history in [CHANGELOG.md](CHANGELOG.md).
 
 ## Roadmap ideas (PRs welcome)
 
 - SSD health / TBW (SMART) on the storage card
-- Per-process energy impact ranking (macmon exposes it in its TUI)
 - Homebrew tap formula
-- Optional multi-Mac fleet view (several minis on one page)
-- Notification via Apple Shortcuts / Pushover natively
+- Multi-Mac fleet view (several minis, one page)
+- Per-process energy impact, now that process history exists
 
-## License
+## Credits & license
 
-MIT. Built on the shoulders of
-[macmon](https://github.com/vladkens/macmon) (MIT),
-[gopsutil](https://github.com/shirou/gopsutil) (BSD-3) and
-[mattn/go-sqlite3](https://github.com/mattn/go-sqlite3) (MIT).
+MIT — see [LICENSE](LICENSE). Built on [macmon](https://github.com/vladkens/macmon) (MIT) for wattage, [gopsutil](https://github.com/shirou/gopsutil) (BSD-3-Clause) for system metrics, and [mattn/go-sqlite3](https://github.com/mattn/go-sqlite3) (MIT).
+
+If MiniPulse saved you from a full disk at 3 a.m., a ⭐ helps other mini owners find it.
+
