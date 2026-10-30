@@ -6,7 +6,7 @@
   --line-soft: #1b1f24;
   --text: #ece9e2;
   --muted: #98a0a8;
-  --faint: #6b7280;
+  --faint: #828b96; /* 5.2:1 on panels — WCAG AA for small text */
   --amber: #f0a831;
   --green: #4caf7d;
   --red: #e05c4b;
