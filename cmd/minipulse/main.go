@@ -1,7 +1,7 @@
-// MiniPulse — a tiny, always-on dashboard for a Mac mini (or any
-// Apple Silicon Mac) used as a home server: live power draw in watts,
-// energy cost, RAM/CPU, a deep "where is my disk going" view, Docker
-// containers, services and alerts. One binary, no sudo, no cloud.
+// MiniPulse — a tiny, always-on dashboard for any Apple Silicon
+// Mac, headless home server or everyday machine: live power draw in
+// watts, energy cost, RAM/CPU, a deep "where is my disk going" view,
+// Docker containers, services and alerts. One binary, no sudo, no cloud.
 //
 // Usage:
 //

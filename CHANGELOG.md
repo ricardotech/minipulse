@@ -4,6 +4,25 @@ All notable changes are documented here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com); versions are tagged
 GitHub releases.
 
+## [Unreleased]
+
+### Added
+- Release tarballs now ship a `.sha256` checksum file next to each
+  download so binaries can be verified (`shasum -a 256 -c …`).
+
+### Changed
+- Positioning: MiniPulse is for **any** Apple Silicon Mac — everyday
+  MacBooks and iMacs included, not only Mac minis running as servers
+  (the "mini" is the agent's size). README gained a personal-Mac
+  angle (fan/battery culprits, which cache filled the disk) and
+  laptop guidance for disk scans.
+
+### Security
+- `launchctl` is now invoked via its absolute path (`/bin/launchctl`),
+  like `lsof`/`scutil` already were — system tools are never resolved
+  through `PATH`.
+- CI workflow runs with `contents: read` permissions only.
+
 ## [0.2.0] — 2026-10-30
 
 ### Added

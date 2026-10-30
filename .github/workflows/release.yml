@@ -25,8 +25,11 @@ jobs:
         run: |
           make build VERSION=${{ github.ref_name }}
           tar -czf minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz minipulse README.md LICENSE
+          shasum -a 256 minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz > minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
+          files: |
+            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
+            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
           generate_release_notes: true
