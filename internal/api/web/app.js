@@ -274,18 +274,46 @@ function connectStream() {
   es.onerror = () => { $("live-dot").className = "dot off"; $("live-txt").textContent = "reconnecting"; };
 }
 
-// Highlight the sidebar link of the section currently in view.
-const navObs = new IntersectionObserver((entries) => {
-  for (const en of entries) {
-    if (!en.isIntersecting) continue;
-    document.querySelectorAll("#sidenav a").forEach((a) =>
-      a.classList.toggle("on", a.getAttribute("href") === "#" + en.target.id));
-  }
-}, { root: $("main"), rootMargin: "-20% 0px -60% 0px" });
-["overview", "storage", "disk", "processes", "services", "events"].forEach((id) => {
-  const el = document.getElementById(id);
-  if (el) navObs.observe(el);
+// Scrollspy: highlight the last section whose top has passed the
+// sticky topbar. Deterministic on scroll (an IntersectionObserver
+// fires in entry order and can leave the wrong link lit when several
+// sections are visible at max scroll). At the very bottom the last
+// section wins, since it can never reach the top.
+const spyIds = ["overview", "storage", "disk", "processes", "services", "events"];
+let spyTick = false;
+// Processes/Services sit side by side and the last sections cannot
+// scroll to the top, so position alone cannot tell which link the
+// user picked. A click locks the highlight to the chosen link until
+// the user scrolls on their own (wheel/touch).
+let spyLock = false;
+document.querySelectorAll("#sidenav a").forEach((a) => {
+  a.addEventListener("click", () => {
+    spyLock = true;
+    document.querySelectorAll("#sidenav a").forEach((x) => x.classList.toggle("on", x === a));
+  });
 });
+["wheel", "touchstart"].forEach((ev) =>
+  $("main").addEventListener(ev, () => { spyLock = false; }, { passive: true }));
+
+function updateSpy() {
+  spyTick = false;
+  if (spyLock) return;
+  const main = $("main");
+  const barBottom = document.querySelector(".topbar").getBoundingClientRect().bottom;
+  let current = spyIds[0];
+  for (const id of spyIds) {
+    const el = document.getElementById(id);
+    if (el && el.getBoundingClientRect().top <= barBottom + 40) current = id;
+  }
+  if (main.scrollTop + main.clientHeight >= main.scrollHeight - 2) {
+    current = spyIds[spyIds.length - 1];
+  }
+  document.querySelectorAll("#sidenav a").forEach((a) =>
+    a.classList.toggle("on", a.getAttribute("href") === "#" + current));
+}
+$("main").addEventListener("scroll", () => {
+  if (!spyTick) { spyTick = true; requestAnimationFrame(updateSpy); }
+}, { passive: true });
 
 // First sample immediately, then paced refreshes.
 loadOverview(); loadHistory(); loadEnergy(); loadProcs(); loadContainers(); loadServices(); loadEvents(); loadDisk();

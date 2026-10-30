@@ -100,6 +100,9 @@ button:disabled { opacity: .5; cursor: wait; }
 
 /* ---- content grid ---- */
 .main > section, .main > footer { margin: 16px 22px 0; }
+/* Anchor jumps must land below the sticky topbar (~54px) + breathing room,
+   otherwise the section title hides underneath it. */
+.main section[id], .main article[id] { scroll-margin-top: 70px; }
 .main > footer { margin-bottom: 26px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px 18px; min-width: 0; }
 .card h2 { font-size: 13px; margin: 0 0 10px; font-weight: 600; }
