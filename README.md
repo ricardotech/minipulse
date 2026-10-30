@@ -27,7 +27,7 @@ minipulse service install   # launchd: starts at login, restarts on crash
 
 Open **http://127.0.0.1:8848**. That's it — no accounts, no cloud, no sudo.
 
-No Go toolchain? Download a tarball from [Releases](https://github.com/ricardotech/minipulse/releases); each ships a `.sha256` file so you can check the download isn't corrupted (`shasum -a 256 -c minipulse-*.sha256` — an integrity check, not a signature). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`. Prefer not to? `go install` above builds from source and skips quarantine entirely.
+No Go toolchain? Download a tarball from [Releases](https://github.com/ricardotech/minipulse/releases); from the next release on, each ships a `.sha256` file so you can check the download isn't corrupted (`cd` to the download folder, then `shasum -a 256 -c minipulse-<version>-darwin-<arch>.tar.gz.sha256` — an integrity check, not a signature). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`. Prefer not to? `go install` above builds from source and skips quarantine entirely.
 
 ## Why?
 
@@ -181,9 +181,9 @@ flowchart LR
 
 **Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
 
-**Does MiniPulse clean or delete anything?** Never touches your files. It is a read-only observer of your data: no file of yours is moved, emptied or deleted, and the only state-changing API call is "rescan the disk now". (It does write to — and prune old rows from — its own local SQLite database.) When the disk view points at a 30 GB cache, deleting it (or not) is your call — see [SECURITY.md](SECURITY.md) for the full threat model.
+**Does MiniPulse clean or delete anything?** Never touches your data files. It is a read-only observer of your data: nothing of yours is moved, emptied or deleted, and the only state-changing API call is "rescan the disk now". (It manages only its own files: config, the launchd plist from `service install`, logs, and its local SQLite database, whose old rows it prunes.) When the disk view points at a 30 GB cache, deleting it (or not) is your call — see [SECURITY.md](SECURITY.md) for the full threat model.
 
-**Will the disk scans hurt my SSD or battery?** A scan is a metadata walk (names and sizes, symlink-safe), the same reads `du` makes — no writes to your files. It does cost CPU while it runs, so on a laptop set `disk_scan_interval_minutes: 0` (then not even the boot-time catch-up scan runs) and rescan on demand; on an always-plugged-in Mac the hourly default is fine. Restarts never trigger a redundant rescan while every root's last scan is still fresh.
+**Will the disk scans hurt my SSD or battery?** A scan is a metadata walk (names and sizes, symlink-safe), the same reads `du` makes — no writes to your files. It does cost CPU while it runs, so on a laptop set `disk_scan_interval_minutes: 0` (from the next release on, then not even the boot-time catch-up scan runs) and rescan on demand; on an always-plugged-in Mac the hourly default is fine. Restarts don't trigger a redundant rescan while every root's last scan is still fresh.
 
 ## Development
 

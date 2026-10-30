@@ -3,6 +3,9 @@ on:
   push:
     tags: ["v*"]
 
+# A manual re-run must not edit the same release concurrently.
+concurrency: release-${{ github.ref_name }}
+
 permissions:
   contents: write
 

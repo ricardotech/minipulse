@@ -4,8 +4,11 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/ricardotech/minipulse/internal/config"
+	"github.com/ricardotech/minipulse/internal/model"
+	"github.com/ricardotech/minipulse/internal/store"
 )
 
 func TestScansStaleOnDemandOnly(t *testing.T) {
@@ -14,6 +17,40 @@ func TestScansStaleOnDemandOnly(t *testing.T) {
 	c := &Collector{cfg: cfg}       // nil store: must return before touching it
 	if c.scansStale() {
 		t.Error("interval 0 must never trigger a boot scan")
+	}
+}
+
+// Positive control for the test above: scheduled mode still asks for
+// a boot scan when none exists, and stops asking once a fresh one is
+// stored.
+func TestScansStaleScheduledMode(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config.Defaults()
+	cfg.DiskScanIntervalMinutes = 60
+	cfg.DiskScanRoots = []string{"/tmp/mp-test-root"}
+	c := &Collector{cfg: cfg, store: st}
+	if !c.scansStale() {
+		t.Fatal("no scan stored + scheduled mode: want stale")
+	}
+	if _, err := st.SaveDiskScan(model.DiskScan{Time: time.Now(), Root: "/tmp/mp-test-root"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c.scansStale() {
+		t.Error("fresh scan stored: want not stale")
+	}
+}
+
+func TestLaunchctlPathExists(t *testing.T) {
+	info, err := os.Stat(launchctlPath)
+	if err != nil {
+		t.Fatalf("launchctl path %s: %v", launchctlPath, err)
+	}
+	if info.IsDir() || info.Mode()&0o111 == 0 {
+		t.Errorf("%s is not an executable file (mode %v)", launchctlPath, info.Mode())
 	}
 }
 
