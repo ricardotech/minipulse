@@ -76,6 +76,7 @@ function drawCharts() {
 function renderSample(s) {
   const p = s.power || {};
   $("watts").textContent = p.available ? p.sys_w.toFixed(1) : "–";
+  $("watts-pill").textContent = p.available ? p.sys_w.toFixed(1) + " W" : "– W";
   $("power-sub").textContent = p.available
     ? "whole system · SoC " + fmtW(p.soc_w)
     : (p.reason || "power unavailable");
@@ -91,7 +92,7 @@ function renderSample(s) {
     : (s.cpu_per_core || []).map((v, i) => ({ label: "C" + i, pct: v }));
   $("cores").innerHTML = tiers.map((c) =>
     `<div class="core"><span>${esc(c.label)}</span><div class="bar"><i style="width:${Math.min(100, c.pct)}%"></i></div><span>${c.pct.toFixed(0)}%</span></div>`).join("");
-  $("load-line").textContent = `load ${s.load1.toFixed(2)} · ${s.load5.toFixed(2)} · ${s.load15.toFixed(2)}`;
+  $("load-line").textContent = `${s.load1.toFixed(2)} · ${s.load5.toFixed(2)} · ${s.load15.toFixed(2)}`;
 
   $("mem-val").textContent = s.mem_pct.toFixed(0) + "%";
   $("mem-bar").style.width = s.mem_pct + "%";
@@ -119,9 +120,10 @@ async function loadOverview() {
     const d = await getJSON("/api/overview");
     state.currency = d.currency || "USD";
     const h = d.host;
-    $("host-line").textContent = `${h.hostname} · ${h.chip || h.model} · ${h.os} · ${fmtBytes(h.mem_total)} RAM`;
+    $("host-line").textContent = h.hostname || "this Mac";
+    $("host-meta").textContent = `${h.chip || h.model} · ${h.os}`;
     const up = Math.floor((Date.now() / 1000 - h.boot_time) / 3600);
-    $("uptime").textContent = "up " + Math.floor(up / 24) + "d " + (up % 24) + "h";
+    $("uptime").textContent = `${fmtBytes(h.mem_total)} RAM · up ${Math.floor(up / 24)}d ${up % 24}h`;
     renderSample(d.sample);
     $("e-today").textContent = d.energy_today.kwh.toFixed(3) + " kWh";
     $("e-cost").textContent = fmtMoney(d.energy_today.cost, state.currency);
@@ -132,7 +134,8 @@ async function loadOverview() {
 async function loadEnergy() {
   try {
     const d = await getJSON("/api/energy?range=7d");
-    $("e-7d").textContent = d.kwh.toFixed(2) + " kWh · " + fmtMoney(d.cost, state.currency);
+    $("e-7d").textContent = d.kwh.toFixed(2) + " kWh";
+    $("e-7d").title = fmtMoney(d.cost, state.currency) + " in 7 days";
     const days = (d.days || []).filter((x) => x.kwh > 0);
     if (days.length) {
       const avgDayCost = days.reduce((a, x) => a + x.cost, 0) / days.length;
@@ -175,7 +178,7 @@ async function loadServices() {
     $("listeners").innerHTML = lis.length ? lis.map((l) =>
       `<span class="pill">${esc(l.process)} :${l.port}</span> `).join("") : "–";
     const svcs = (d.services || []).filter((s) => !s.label.startsWith("com.apple."));
-    $("services").innerHTML = svcs.length ? svcs.map((s) =>
+    $("services-list").innerHTML = svcs.length ? svcs.map((s) =>
       `<div class="kv"><span>${esc(s.label)}</span><b class="${s.pid ? "up" : ""}">${s.pid ? "pid " + s.pid : "stopped"}</b></div>`).join("")
       : "–";
     renderHealth(d.health);
@@ -186,7 +189,7 @@ async function loadEvents() {
   try {
     const list = await getJSON("/api/events?limit=30");
     if (!list || !list.length) return;
-    $("events").innerHTML = list.map((e) =>
+    $("events-list").innerHTML = list.map((e) =>
       `<div class="ev"><time>${new Date(e.time).toLocaleString()}</time><span class="${e.kind === "alert" ? "down" : "up"}">●</span> ${esc(e.title)} <span class="muted">${esc(e.detail || "")}</span></div>`).join("");
   } catch (e) {}
 }
@@ -266,10 +269,23 @@ window.addEventListener("resize", drawCharts);
 // --- live stream with auto-reconnect ---
 function connectStream() {
   const es = new EventSource("/api/stream");
-  es.onopen = () => { $("live-dot").className = "dot on"; };
+  es.onopen = () => { $("live-dot").className = "dot on"; $("live-txt").textContent = "live"; };
   es.onmessage = (ev) => { try { renderSample(JSON.parse(ev.data)); } catch (e) {} };
-  es.onerror = () => { $("live-dot").className = "dot off"; };
+  es.onerror = () => { $("live-dot").className = "dot off"; $("live-txt").textContent = "reconnecting"; };
 }
+
+// Highlight the sidebar link of the section currently in view.
+const navObs = new IntersectionObserver((entries) => {
+  for (const en of entries) {
+    if (!en.isIntersecting) continue;
+    document.querySelectorAll("#sidenav a").forEach((a) =>
+      a.classList.toggle("on", a.getAttribute("href") === "#" + en.target.id));
+  }
+}, { root: $("main"), rootMargin: "-20% 0px -60% 0px" });
+["overview", "storage", "disk", "processes", "services", "events"].forEach((id) => {
+  const el = document.getElementById(id);
+  if (el) navObs.observe(el);
+});
 
 // First sample immediately, then paced refreshes.
 loadOverview(); loadHistory(); loadEnergy(); loadProcs(); loadContainers(); loadServices(); loadEvents(); loadDisk();

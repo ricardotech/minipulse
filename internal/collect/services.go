@@ -47,7 +47,9 @@ var lsofName = regexp.MustCompile(`^(.*):(\d+)$`)
 // Mac). Without sudo only the current user's processes are visible —
 // acceptable for a single-user server box, and documented.
 func Listeners(ctx context.Context) ([]model.Listener, error) {
-	out, err := exec.CommandContext(ctx, "lsof", "-nP", "-iTCP", "-sTCP:LISTEN").Output()
+	// Absolute path: lsof lives in /usr/sbin, which a launchd agent's
+	// minimal PATH does not include.
+	out, err := exec.CommandContext(ctx, "/usr/sbin/lsof", "-nP", "-iTCP", "-sTCP:LISTEN").Output()
 	if err != nil {
 		return nil, err
 	}

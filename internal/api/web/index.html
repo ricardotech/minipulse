@@ -8,124 +8,162 @@
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>◉</text></svg>">
 </head>
 <body>
-<header>
-  <div class="brand">
-    <span class="dot" id="live-dot" title="live stream status"></span>
-    <h1>MiniPulse</h1>
-    <span class="host" id="host-line">connecting…</span>
-  </div>
-  <div class="head-right">
-    <span id="uptime" class="muted"></span>
-    <nav class="ranges" id="ranges">
-      <button data-range="1h" class="on">1h</button><button data-range="6h">6h</button><button data-range="24h">24h</button><button data-range="7d">7d</button><button data-range="30d">30d</button>
-    </nav>
-  </div>
-</header>
-
-<main>
-  <section class="hero card">
-    <div class="hero-main">
-      <div class="label">Power draw</div>
-      <div class="big"><span id="watts">–</span><span class="unit">W</span></div>
-      <div class="sub" id="power-sub">system</div>
-      <div class="chips">
-        <span class="chip">CPU <b id="pw-cpu">–</b></span>
-        <span class="chip">GPU <b id="pw-gpu">–</b></span>
-        <span class="chip">ANE <b id="pw-ane">–</b></span>
-        <span class="chip">CPU temp <b id="pw-temp">–</b></span>
-        <span class="chip">Fan <b id="pw-fan">–</b></span>
+<div class="shell">
+  <aside>
+    <div class="brand">
+      <span class="logo">◉</span>
+      <div>
+        <h1>MiniPulse</h1>
+        <div class="live"><span class="dot" id="live-dot"></span><span id="live-txt">connecting</span></div>
       </div>
     </div>
-    <div class="hero-side">
+
+    <div class="hostbox">
+      <div class="hostname" id="host-line">—</div>
+      <div class="hostmeta" id="host-meta"></div>
+      <div class="hostmeta" id="uptime"></div>
+    </div>
+
+    <nav class="sidenav" id="sidenav">
+      <a href="#overview" class="on">Overview</a>
+      <a href="#storage">Storage</a>
+      <a href="#disk">Disk deep-dive</a>
+      <a href="#processes">Processes</a>
+      <a href="#services">Services &amp; ports</a>
+      <a href="#events">Events &amp; alerts</a>
+    </nav>
+
+    <div class="side-energy">
+      <div class="side-h">Energy</div>
       <div class="kv"><span>Today</span><b id="e-today">–</b></div>
       <div class="kv"><span>Cost today</span><b id="e-cost">–</b></div>
       <div class="kv"><span>Last 7 days</span><b id="e-7d">–</b></div>
       <div class="kv"><span>Est. / month</span><b id="e-month">–</b></div>
-      <canvas id="chart-power" class="chart" height="90"></canvas>
     </div>
-  </section>
 
-  <section class="grid">
-    <article class="card">
-      <h2>CPU <span class="val" id="cpu-val">–</span></h2>
-      <div id="cores" class="cores"></div>
-      <div class="sub" id="load-line">load –</div>
-      <canvas id="chart-cpu" class="chart" height="64"></canvas>
-    </article>
-    <article class="card">
-      <h2>Memory <span class="val" id="mem-val">–</span></h2>
-      <div class="bar"><i id="mem-bar"></i></div>
-      <div class="sub" id="mem-line">–</div>
-      <div class="sub" id="swap-line">swap –</div>
-      <canvas id="chart-mem" class="chart" height="64"></canvas>
-    </article>
-    <article class="card">
-      <h2>Network</h2>
-      <div class="kv"><span>↓ receive</span><b id="net-rx">–</b></div>
-      <div class="kv"><span>↑ send</span><b id="net-tx">–</b></div>
-      <canvas id="chart-net" class="chart" height="64"></canvas>
-    </article>
-    <article class="card">
-      <h2>Disk I/O</h2>
-      <div class="kv"><span>Read</span><b id="io-r">–</b></div>
-      <div class="kv"><span>Write</span><b id="io-w">–</b></div>
-      <canvas id="chart-io" class="chart" height="64"></canvas>
-    </article>
-  </section>
+    <div class="side-foot">
+      watts via <a href="https://github.com/vladkens/macmon">macmon</a><br>
+      <a href="/metrics">/metrics</a> · <a href="https://github.com/ricardotech/minipulse">GitHub</a>
+    </div>
+  </aside>
 
-  <section class="card">
-    <h2>Storage <span class="muted" id="vol-note"></span></h2>
-    <div id="volumes"></div>
-  </section>
-
-  <section class="card">
-    <div class="row">
-      <h2>Where is the disk going?</h2>
-      <div class="row-right">
-        <select id="disk-root"></select>
-        <nav class="tabs" id="disk-tabs">
-          <button data-view="tree" class="on">Browse</button><button data-view="growth">What grew</button><button data-view="biggest">Biggest files</button>
+  <div class="main" id="main">
+    <header class="topbar">
+      <div class="crumb">Overview <span class="muted">/ live every 2s</span></div>
+      <div class="top-right">
+        <span class="wattpill" title="Whole-system power draw">⚡ <b id="watts-pill">–</b></span>
+        <nav class="ranges" id="ranges">
+          <button data-range="1h" class="on">1h</button><button data-range="6h">6h</button><button data-range="24h">24h</button><button data-range="7d">7d</button><button data-range="30d">30d</button>
         </nav>
-        <button id="rescan">Rescan</button>
       </div>
-    </div>
-    <div class="sub" id="scan-line">no scan yet</div>
-    <div class="crumbs" id="crumbs"></div>
-    <div id="disk-body"></div>
-  </section>
+    </header>
 
-  <section class="grid2">
-    <article class="card">
-      <div class="row"><h2>Top processes</h2>
-        <nav class="tabs" id="proc-tabs"><button data-sort="mem" class="on">RAM</button><button data-sort="cpu">CPU</button></nav>
+    <section id="overview" class="kpis">
+      <article class="kpi kpi-power">
+        <div class="kpi-h">Power draw <span class="muted" id="power-sub">system</span></div>
+        <div class="kpi-big"><span id="watts">–</span><span class="unit">W</span></div>
+        <div class="chips">
+          <span class="chip">CPU <b id="pw-cpu">–</b></span>
+          <span class="chip">GPU <b id="pw-gpu">–</b></span>
+          <span class="chip">ANE <b id="pw-ane">–</b></span>
+          <span class="chip">Fan <b id="pw-fan">–</b></span>
+        </div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-h">CPU <span class="val" id="cpu-val">–</span></div>
+        <div class="kpi-mid" id="load-line">load –</div>
+        <div class="kpi-sub">load average 1m · 5m · 15m — per-core below</div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-h">Memory <span class="val" id="mem-val">–</span></div>
+        <div class="kpi-mid" id="mem-line">–</div>
+        <div class="bar"><i id="mem-bar"></i></div>
+        <div class="kpi-sub" id="swap-line">swap –</div>
+      </article>
+      <article class="kpi">
+        <div class="kpi-h">Thermals</div>
+        <div class="kpi-mid"><span id="pw-temp">–</span></div>
+        <div class="kpi-sub">CPU temperature · fan in Power tile</div>
+      </article>
+    </section>
+
+    <section class="row-charts">
+      <article class="card span8">
+        <h2>Power <span class="muted">system vs SoC · watts</span></h2>
+        <canvas id="chart-power" class="chart" height="170"></canvas>
+      </article>
+      <article class="card span4">
+        <h2>CPU cores</h2>
+        <div id="cores" class="cores"></div>
+      </article>
+      <article class="card span4">
+        <h2>CPU %</h2>
+        <canvas id="chart-cpu" class="chart" height="92"></canvas>
+      </article>
+      <article class="card span4">
+        <h2>Memory %</h2>
+        <canvas id="chart-mem" class="chart" height="92"></canvas>
+      </article>
+      <article class="card span4">
+        <h2>Network <span class="muted">↓ <b class="inline" id="net-rx">–</b> · ↑ <b class="inline" id="net-tx">–</b></span></h2>
+        <canvas id="chart-net" class="chart" height="92"></canvas>
+      </article>
+      <article class="card span12">
+        <h2>Disk I/O <span class="muted">read <b class="inline" id="io-r">–</b> · write <b class="inline" id="io-w">–</b></span></h2>
+        <canvas id="chart-io" class="chart" height="80"></canvas>
+      </article>
+    </section>
+
+    <section id="storage" class="card">
+      <h2>Storage <span class="muted" id="vol-note">APFS containers counted once</span></h2>
+      <div id="volumes" class="volumes-grid"></div>
+    </section>
+
+    <section id="disk" class="card">
+      <div class="row">
+        <h2>Where is the disk going?</h2>
+        <div class="row-right">
+          <select id="disk-root"></select>
+          <nav class="tabs" id="disk-tabs">
+            <button data-view="tree" class="on">Browse</button><button data-view="growth">What grew</button><button data-view="biggest">Biggest files</button>
+          </nav>
+          <button id="rescan">Rescan</button>
+        </div>
       </div>
-      <table id="procs"><thead><tr><th>Process</th><th class="r">RAM</th><th class="r">CPU</th></tr></thead><tbody></tbody></table>
-    </article>
-    <article class="card">
-      <h2>Containers <span class="muted" id="docker-note"></span></h2>
-      <div id="containers" class="sub">–</div>
-      <h2 class="mt">Health checks</h2>
-      <div id="health" class="sub">none configured</div>
-    </article>
-  </section>
+      <div class="sub" id="scan-line">no scan yet</div>
+      <div class="crumbs" id="crumbs"></div>
+      <div id="disk-body" class="disk-body"></div>
+    </section>
 
-  <section class="grid2">
-    <article class="card">
-      <h2>Listening ports</h2>
-      <div id="listeners" class="sub">–</div>
-      <h2 class="mt">Services (launchd)</h2>
-      <div id="services" class="sub">–</div>
-    </article>
-    <article class="card">
+    <section class="row-tables">
+      <article id="processes" class="card span5">
+        <div class="row"><h2>Top processes</h2>
+          <nav class="tabs" id="proc-tabs"><button data-sort="mem" class="on">RAM</button><button data-sort="cpu">CPU</button></nav>
+        </div>
+        <table id="procs"><thead><tr><th>Process</th><th class="r">RAM</th><th class="r">CPU</th></tr></thead><tbody></tbody></table>
+      </article>
+      <article class="card span4">
+        <h2>Containers <span class="muted" id="docker-note"></span></h2>
+        <div id="containers" class="sub">–</div>
+        <h2 class="mt">Health checks</h2>
+        <div id="health" class="sub">none configured</div>
+      </article>
+      <article id="services" class="card span3">
+        <h2>Listening ports</h2>
+        <div id="listeners" class="sub">–</div>
+        <h2 class="mt">Services (launchd)</h2>
+        <div id="services-list" class="sub scrollbox">–</div>
+      </article>
+    </section>
+
+    <section id="events" class="card">
       <h2>Events &amp; alerts</h2>
-      <div id="events" class="sub">nothing yet</div>
-    </article>
-  </section>
+      <div id="events-list" class="events-grid"><span class="sub">nothing yet</span></div>
+    </section>
 
-  <footer class="muted">
-    MiniPulse · watts via <a href="https://github.com/vladkens/macmon">macmon</a> · API <code>/api/*</code> · Prometheus <code>/metrics</code>
-  </footer>
-</main>
+    <footer class="muted foot">MiniPulse · local-only by default · API <code>/api/*</code> · Prometheus <code>/metrics</code></footer>
+  </div>
+</div>
 <script src="app.js"></script>
 </body>
 </html>
