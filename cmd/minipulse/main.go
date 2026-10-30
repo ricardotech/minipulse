@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"syscall"
 	"time"
 
@@ -97,6 +98,11 @@ func cmdServe(args []string) error {
 		return fmt.Errorf("refusing to listen on %s without an API token: "+
 			"run `minipulse token`, set \"token\" in %s, or bind 127.0.0.1 and use Tailscale Serve", cfg.Addr, *cfgPath)
 	}
+
+	// An always-on monitoring agent should stay small: cap the Go heap
+	// (disk scans may burst above it briefly, then hand memory back).
+	debug.SetMemoryLimit(192 << 20)
+	debug.SetGCPercent(50)
 
 	st, err := store.Open(cfg.DataDir)
 	if err != nil {
