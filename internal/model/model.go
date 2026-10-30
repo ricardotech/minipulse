@@ -71,15 +71,16 @@ type Sample struct {
 	Volumes     []Volume  `json:"volumes,omitempty"`
 }
 
-// Process is one row of the top-processes table.
+// Process is one row of the top-processes table. The full command
+// line is deliberately NOT exposed: argv routinely contains tokens
+// and passwords (`mysql -p…`, `--token=…`), and the API may be
+// shared with a phone on the LAN. Name + PID identify a process.
 type Process struct {
-	PID     int32   `json:"pid"`
-	Name    string  `json:"name"`
-	CPUPct  float64 `json:"cpu_pct"`
-	MemPct  float32 `json:"mem_pct"`
-	RSS     uint64  `json:"rss"`
-	User    string  `json:"user,omitempty"`
-	Command string  `json:"command,omitempty"`
+	PID    int32   `json:"pid"`
+	Name   string  `json:"name"`
+	CPUPct float64 `json:"cpu_pct"`
+	MemPct float32 `json:"mem_pct"`
+	RSS    uint64  `json:"rss"`
 }
 
 // DiskEntry is one directory or file in a disk scan snapshot.

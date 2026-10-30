@@ -69,22 +69,55 @@
           <span class="chip">Fan <b id="pw-fan">–</b></span>
         </div>
       </article>
-      <article class="kpi">
+      <article class="kpi clickable" id="kpi-cpu" data-proc="cpu" role="button" tabindex="0" aria-expanded="false" title="Click for per-process detail">
         <div class="kpi-h">CPU <span class="val" id="cpu-val">–</span></div>
         <div class="kpi-mid" id="load-line">load –</div>
         <div class="kpi-sub">load average 1m · 5m · 15m — per-core below</div>
+        <div class="chev">per-process detail ▾</div>
       </article>
-      <article class="kpi">
+      <article class="kpi clickable" id="kpi-mem" data-proc="mem" role="button" tabindex="0" aria-expanded="false" title="Click for per-process detail">
         <div class="kpi-h">Memory <span class="val" id="mem-val">–</span></div>
         <div class="kpi-mid" id="mem-line">–</div>
         <div class="bar"><i id="mem-bar"></i></div>
         <div class="kpi-sub" id="swap-line">swap –</div>
+        <div class="chev">per-process detail ▾</div>
       </article>
       <article class="kpi">
         <div class="kpi-h">Thermals</div>
         <div class="kpi-mid"><span id="pw-temp">–</span></div>
         <div class="kpi-sub">CPU temperature · fan in Power tile</div>
       </article>
+    </section>
+
+    <section id="proc-drawer" class="card drawer" hidden>
+      <div class="row">
+        <h2 id="pd-title">Processes — detail</h2>
+        <div class="row-right">
+          <nav class="tabs" id="pd-tabs">
+            <button data-tab="live" class="on">Live</button><button data-tab="history">History</button>
+          </nav>
+          <nav class="ranges" id="pd-ranges" hidden>
+            <button data-range="1h">1h</button><button data-range="6h" class="on">6h</button><button data-range="24h">24h</button><button data-range="7d">7d</button><button data-range="14d">14d</button>
+          </nav>
+          <button id="pd-close" title="Close (Esc)">✕</button>
+        </div>
+      </div>
+      <div id="pd-live">
+        <div class="tscroll"><table id="pd-live-table">
+          <thead><tr><th>Process</th><th class="r">PID</th><th>CPU</th><th class="r">CPU %</th><th class="r">RAM</th><th class="r">RAM %</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+        <div class="sub" id="pd-live-note">live, refreshes every 3s while open</div>
+      </div>
+      <div id="pd-history" hidden>
+        <canvas id="chart-procs" class="chart" height="180"></canvas>
+        <div class="sub">Top consumers stacked over time — <b>click the chart</b> to see exactly what was running at that moment. History is sampled every <span id="pd-interval">30</span>s, top processes only.</div>
+        <div id="pd-at" class="pd-at" hidden></div>
+        <div class="tscroll"><table id="pd-leaders">
+          <thead><tr><th>Process</th><th class="r">Avg CPU</th><th class="r">Peak</th><th>Peak at</th><th class="r">Avg RAM</th><th class="r">Peak RAM</th></tr></thead>
+          <tbody></tbody>
+        </table></div>
+      </div>
     </section>
 
     <section class="row-charts">

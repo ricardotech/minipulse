@@ -9,7 +9,9 @@ import (
 	"fmt"
 	"io/fs"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"time"
@@ -43,6 +45,8 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/stream", s.auth(http.HandlerFunc(s.stream)))
 	mux.Handle("GET /api/history", s.auth(http.HandlerFunc(s.history)))
 	mux.Handle("GET /api/processes", s.auth(http.HandlerFunc(s.processes)))
+	mux.Handle("GET /api/processes/history", s.auth(http.HandlerFunc(s.processHistory)))
+	mux.Handle("GET /api/processes/at", s.auth(http.HandlerFunc(s.processesAt)))
 	mux.Handle("GET /api/energy", s.auth(http.HandlerFunc(s.energy)))
 	mux.Handle("GET /api/disk", s.auth(http.HandlerFunc(s.disk)))
 	mux.Handle("POST /api/disk/scan", s.auth(http.HandlerFunc(s.diskScan)))
@@ -50,8 +54,72 @@ func (s *Server) Handler() http.Handler {
 	mux.Handle("GET /api/services", s.auth(http.HandlerFunc(s.services)))
 	mux.Handle("GET /api/events", s.auth(http.HandlerFunc(s.events)))
 	mux.Handle("GET /metrics", s.auth(http.HandlerFunc(s.metrics)))
-	mux.Handle("/", http.FileServer(http.FS(s.web)))
-	return logRequests(mux)
+	mux.Handle("/", s.tokenBootstrap(http.FileServer(http.FS(s.web))))
+	return securityHeaders(s.hostGuard(s.originGuard(logRequests(mux))))
+}
+
+// hostGuard defeats DNS rebinding in the default loopback setup: a
+// malicious page whose domain rebinds to 127.0.0.1 arrives with its
+// own hostname in Host, and is refused. *.ts.net is allowed because
+// Tailscale Serve (the documented phone-access path) proxies with
+// the tailnet hostname intact.
+func (s *Server) hostGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if s.cfg.IsLoopback() && !isLocalHost(r.Host) {
+			writeJSON(w, http.StatusForbidden, map[string]any{"error": "forbidden host"})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func isLocalHost(hostPort string) bool {
+	host := hostPort
+	if h, _, err := net.SplitHostPort(hostPort); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	if host == "localhost" || strings.HasSuffix(host, ".ts.net") {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
+// originGuard requires state-changing requests to be same-origin
+// when a browser Origin header is present (CSRF defense that also
+// covers the no-token loopback default). Non-browser clients send
+// no Origin and are unaffected.
+func (s *Server) originGuard(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			if origin := r.Header.Get("Origin"); origin != "" {
+				u, err := url.Parse(origin)
+				if err != nil || u.Host != r.Host {
+					writeJSON(w, http.StatusForbidden, map[string]any{"error": "cross-origin request refused"})
+					return
+				}
+			}
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// securityHeaders sets conservative response headers. The CSP keeps
+// everything same-origin; inline styles are allowed because the UI
+// sets style="" attributes for bar widths (scripts stay 'self'-only).
+func securityHeaders(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("Content-Security-Policy",
+			"default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; "+
+				"img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+		next.ServeHTTP(w, r)
+	})
 }
 
 // auth requires the configured token (when set) via Authorization
@@ -59,30 +127,74 @@ func (s *Server) Handler() http.Handler {
 // so browser users only paste it once).
 func (s *Server) auth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		token := s.cfg.Token
-		if token == "" {
+		if s.cfg.Token == "" {
 			next.ServeHTTP(w, r)
 			return
 		}
-		got := r.Header.Get("X-MiniPulse-Token")
-		if got == "" {
-			got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer ")
-		}
-		if got == "" {
-			if c, err := r.Cookie("mp_token"); err == nil {
-				got = c.Value
-			}
-		}
-		if q := r.URL.Query().Get("token"); q != "" {
-			got = q
-			http.SetCookie(w, &http.Cookie{Name: "mp_token", Value: q, Path: "/", HttpOnly: true, SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600})
-		}
-		if subtle.ConstantTimeCompare([]byte(got), []byte(token)) != 1 {
+		got, fromQuery := tokenFromRequest(r)
+		if !s.validToken(got) {
 			writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid or missing token"})
 			return
 		}
+		if fromQuery {
+			s.setTokenCookie(w, r, got)
+		}
 		next.ServeHTTP(w, r)
 	})
+}
+
+// tokenBootstrap lets the documented one-time `/?token=…` link work:
+// the static UI route validates the query token and, only when it is
+// correct, sets the cookie the API calls then rely on. It never
+// blocks: the UI shell itself is public, the data is not.
+func (s *Server) tokenBootstrap(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if q := r.URL.Query().Get("token"); q != "" && s.validToken(q) {
+			s.setTokenCookie(w, r, q)
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func (s *Server) validToken(got string) bool {
+	return s.cfg.Token != "" &&
+		subtle.ConstantTimeCompare([]byte(got), []byte(s.cfg.Token)) == 1
+}
+
+func (s *Server) setTokenCookie(w http.ResponseWriter, r *http.Request, token string) {
+	// Behind Tailscale Serve the browser-facing hop is HTTPS while
+	// r.TLS is nil (Serve terminates TLS), so mark ts.net cookies
+	// Secure too. r.Host is what the cookie will be scoped to.
+	host := r.Host
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	host = strings.TrimSuffix(strings.ToLower(host), ".")
+	http.SetCookie(w, &http.Cookie{
+		Name: "mp_token", Value: token, Path: "/", HttpOnly: true,
+		SameSite: http.SameSiteLaxMode, MaxAge: 30 * 24 * 3600,
+		Secure: r.TLS != nil || strings.HasSuffix(strings.ToLower(host), ".ts.net"),
+	})
+}
+
+// tokenFromRequest extracts the presented token and whether it came
+// from the query string (only then is a cookie minted, after the
+// caller validates it — minting before validation would let a
+// malicious link overwrite a victim's good cookie).
+func tokenFromRequest(r *http.Request) (got string, fromQuery bool) {
+	if q := r.URL.Query().Get("token"); q != "" {
+		return q, true
+	}
+	if got = r.Header.Get("X-MiniPulse-Token"); got != "" {
+		return got, false
+	}
+	if got = strings.TrimPrefix(r.Header.Get("Authorization"), "Bearer "); got != "" && got != r.Header.Get("Authorization") {
+		return got, false
+	}
+	if c, err := r.Cookie("mp_token"); err == nil {
+		return c.Value, false
+	}
+	return "", false
 }
 
 func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
@@ -109,7 +221,7 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 // stream is the SSE feed: the current sample is sent immediately,
 // then one event per sample tick (server-paced), with heartbeats.
 func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
@@ -119,11 +231,24 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Connection", "keep-alive")
 	w.Header().Set("X-Accel-Buffering", "no")
 
-	ch, leave := s.coll.Subscribe()
+	ch, leave, subscribed := s.coll.Subscribe()
+	if !subscribed {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "too many live connections"})
+		return
+	}
 	defer leave()
+	rc := http.NewResponseController(w)
+	send := func(payload []byte) bool {
+		_ = rc.SetWriteDeadline(time.Now().Add(5 * time.Second))
+		if _, err := w.Write(payload); err != nil {
+			return false
+		}
+		return rc.Flush() == nil
+	}
 	if latest, ok := s.coll.Latest(); ok {
-		writeSSE(w, latest)
-		flusher.Flush()
+		if !send(sseData(latest)) {
+			return
+		}
 	}
 	heartbeat := time.NewTicker(15 * time.Second)
 	defer heartbeat.Stop()
@@ -132,21 +257,23 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request) {
 		case <-r.Context().Done():
 			return
 		case sm := <-ch:
-			writeSSE(w, sm)
-			flusher.Flush()
+			if !send(sseData(sm)) {
+				return // slow or dead client: free the goroutine and fd
+			}
 		case <-heartbeat.C:
-			fmt.Fprint(w, ": heartbeat\n\n")
-			flusher.Flush()
+			if !send([]byte(": heartbeat\n\n")) {
+				return
+			}
 		}
 	}
 }
 
-func writeSSE(w http.ResponseWriter, v any) {
+func sseData(v any) []byte {
 	data, err := json.Marshal(v)
 	if err != nil {
-		return
+		return nil
 	}
-	fmt.Fprintf(w, "data: %s\n\n", data)
+	return []byte(fmt.Sprintf("data: %s\n\n", data))
 }
 
 func (s *Server) history(w http.ResponseWriter, r *http.Request) {
@@ -171,6 +298,8 @@ func rangeParams(name string) (time.Duration, int64) {
 		return 24 * time.Hour, 120
 	case "7d":
 		return 7 * 24 * time.Hour, 900
+	case "14d":
+		return 14 * 24 * time.Hour, 1800
 	case "30d":
 		return 30 * 24 * time.Hour, 3600
 	default:
@@ -180,13 +309,109 @@ func rangeParams(name string) (time.Duration, int64) {
 
 func (s *Server) processes(w http.ResponseWriter, r *http.Request) {
 	byCPU := r.URL.Query().Get("sort") == "cpu"
-	limit := intParam(r, "limit", 15)
+	limit := intParam(r, "limit", 15, 100)
 	procs, err := s.coll.TopProcesses(byCPU, limit)
 	if err != nil {
 		serverErr(w, err)
 		return
 	}
 	writeJSON(w, http.StatusOK, procs)
+}
+
+// processHistory serves the "who consumed what, when" view: ranked
+// leaders for the window plus bucketed series for the chart. Series
+// are densified onto a shared bucket grid (0 = process absent) so the
+// UI can stack them directly.
+func (s *Server) processHistory(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	byMem := q.Get("sort") == "mem"
+	dur, step := rangeParams(q.Get("range"))
+	now := time.Now()
+	from := now.Add(-dur)
+	limit := intParam(r, "limit", 8, 25)
+
+	leaders, err := s.store.ProcessLeaders(r.Context(), from, now, byMem, limit)
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	if leaders == nil {
+		leaders = []store.ProcessLeader{}
+	}
+	names := make([]string, len(leaders))
+	for i, l := range leaders {
+		names[i] = l.Name
+	}
+	raw, err := s.store.ProcessSeries(r.Context(), from, now, step, names)
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	// Shared bucket grid from `from` (floored to step) to now.
+	start := from.Unix() / step * step
+	var buckets []int64
+	for b := start; b <= now.Unix(); b += step {
+		buckets = append(buckets, b)
+	}
+	type seriesOut struct {
+		Name   string            `json:"name"`
+		Points []store.ProcPoint `json:"points"`
+	}
+	series := []seriesOut{}
+	for _, name := range names {
+		byBucket := map[int64]store.ProcPoint{}
+		for _, p := range raw[name] {
+			byBucket[p.Time.Unix()] = p
+		}
+		pts := make([]store.ProcPoint, len(buckets))
+		for i, b := range buckets {
+			if p, ok := byBucket[b]; ok {
+				pts[i] = p
+			} else {
+				pts[i] = store.ProcPoint{Time: time.Unix(b, 0)}
+			}
+		}
+		series = append(series, seriesOut{Name: name, Points: pts})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"range": q.Get("range"), "step_s": step,
+		"from": time.Unix(start, 0), "to": now,
+		"leaders": leaders, "series": series,
+		"sample_interval_s": s.cfg.ProcessSampleIntervalSeconds,
+	})
+}
+
+// processesAt answers "what was consuming at time T?" from the stored
+// snapshots (?ts= unix seconds or RFC3339).
+func (s *Server) processesAt(w http.ResponseWriter, r *http.Request) {
+	raw := r.URL.Query().Get("ts")
+	var t time.Time
+	if unix, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		t = time.Unix(unix, 0)
+	} else if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+		t = parsed
+	} else {
+		writeJSON(w, http.StatusBadRequest, map[string]any{"error": "ts must be unix seconds or RFC3339"})
+		return
+	}
+	if now := time.Now(); t.After(now) {
+		t = now // the future has no snapshots; answer with the latest
+	}
+	procs, at, err := s.store.ProcessesAt(r.Context(), t)
+	if err != nil {
+		serverErr(w, err)
+		return
+	}
+	if procs == nil {
+		procs = []model.Process{}
+	}
+	// Zero time would render as year 1 in the UI; null means "no
+	// snapshot stored that far back".
+	var snapshotAt any
+	if !at.IsZero() {
+		snapshotAt = at
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"requested": t, "snapshot_at": snapshotAt, "processes": procs})
 }
 
 func (s *Server) energy(w http.ResponseWriter, r *http.Request) {
@@ -285,7 +510,7 @@ func (s *Server) disk(w http.ResponseWriter, r *http.Request) {
 		}
 		out["growth"], out["previous_scan"] = g, prev
 	case "biggest":
-		files, err := s.store.BiggestFiles(latest.ID, intParam(r, "limit", 50))
+		files, err := s.store.BiggestFiles(latest.ID, intParam(r, "limit", 50, 200))
 		if err != nil {
 			serverErr(w, err)
 			return
@@ -353,7 +578,7 @@ func (s *Server) services(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) events(w http.ResponseWriter, r *http.Request) {
-	ev, err := s.store.Events(intParam(r, "limit", 50))
+	ev, err := s.store.Events(intParam(r, "limit", 50, 200))
 	if err != nil {
 		serverErr(w, err)
 		return
@@ -407,11 +632,19 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func serverErr(w http.ResponseWriter, err error) {
 	slog.Warn("api", "err", err)
-	writeJSON(w, http.StatusInternalServerError, map[string]any{"error": err.Error()})
+	// Details stay in the log; SQLite/Docker errors carry internal
+	// paths that API clients have no business seeing.
+	writeJSON(w, http.StatusInternalServerError, map[string]any{"error": "internal error"})
 }
 
-func intParam(r *http.Request, name string, def int) int {
+// intParam reads a positive int query param clamped to [1, max], so
+// a caller cannot force unbounded result sets (the store is a single
+// SQLite connection shared with the collector's writes).
+func intParam(r *http.Request, name string, def, max int) int {
 	if v, err := strconv.Atoi(r.URL.Query().Get(name)); err == nil && v > 0 {
+		if v > max {
+			return max
+		}
 		return v
 	}
 	return def

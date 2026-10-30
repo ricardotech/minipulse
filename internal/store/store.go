@@ -3,6 +3,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -48,14 +49,23 @@ CREATE TABLE IF NOT EXISTS events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   ts INTEGER, kind TEXT, title TEXT, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS process_samples (
+  ts INTEGER, pid INTEGER, name TEXT,
+  cpu_pct REAL, mem_pct REAL, rss INTEGER,
+  PRIMARY KEY (ts, pid)
+);
+CREATE INDEX IF NOT EXISTS idx_ps_name_ts ON process_samples(name, ts);
 CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 `
 
-// Open creates (or opens) the database inside dir.
+// Open creates (or opens) the database inside dir. The directory is
+// owner-only: the history contains process names and your file
+// paths, which are not other local users' business.
 func Open(dir string) (*Store, error) {
-	if err := os.MkdirAll(dir, 0o755); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
+	_ = os.Chmod(dir, 0o700) // tighten dirs created by older versions
 	path := filepath.Join(dir, "minipulse.db")
 	db, err := sql.Open("sqlite3", path+"?_journal_mode=WAL&_busy_timeout=5000")
 	if err != nil {
@@ -372,9 +382,151 @@ func (s *Store) Events(limit int) ([]model.Event, error) {
 	return out, rows.Err()
 }
 
-// Prune deletes samples older than retentionDays and keeps at most
-// keepScans disk scans per root.
-func (s *Store) Prune(retentionDays, keepScans int) error {
+// InsertProcessSample stores one top-processes snapshot.
+func (s *Store) InsertProcessSample(ts time.Time, procs []model.Process) error {
+	tx, err := s.db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	stmt, err := tx.Prepare(`INSERT OR REPLACE INTO process_samples VALUES (?,?,?,?,?,?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+	for _, p := range procs {
+		if _, err := stmt.Exec(ts.Unix(), p.PID, p.Name, p.CPUPct, p.MemPct, p.RSS); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
+// ProcessLeader aggregates one process name over a window.
+type ProcessLeader struct {
+	Name      string    `json:"name"`
+	AvgCPU    float64   `json:"avg_cpu"`
+	PeakCPU   float64   `json:"peak_cpu"`
+	PeakCPUAt time.Time `json:"peak_cpu_at"`
+	AvgRSS    int64     `json:"avg_rss"`
+	PeakRSS   int64     `json:"peak_rss"`
+	Samples   int       `json:"samples"`
+}
+
+// ProcessLeaders ranks process names by average CPU (or peak RSS when
+// byMem) over [from,to). Instances sharing a name (Chrome helpers,
+// several node processes…) are summed per snapshot first, so a name's
+// figures mean "all of Chrome", not "one average helper".
+func (s *Store) ProcessLeaders(ctx context.Context, from, to time.Time, byMem bool, limit int) ([]ProcessLeader, error) {
+	order := "avg_cpu DESC"
+	if byMem {
+		order = "peak_rss DESC"
+	}
+	rows, err := s.db.QueryContext(ctx, `
+		SELECT name, AVG(cpu) AS avg_cpu, MAX(cpu), CAST(AVG(rss) AS INTEGER), MAX(rss) AS peak_rss, COUNT(*),
+			(SELECT ts FROM (SELECT ts, name, SUM(cpu_pct) AS c FROM process_samples
+				WHERE ts>=? AND ts<? GROUP BY ts, name) q
+				WHERE q.name=p.name ORDER BY q.c DESC LIMIT 1)
+		FROM (SELECT ts, name, SUM(cpu_pct) AS cpu, SUM(rss) AS rss FROM process_samples
+			WHERE ts>=? AND ts<? GROUP BY ts, name) p
+		GROUP BY name ORDER BY `+order+` LIMIT ?`,
+		from.Unix(), to.Unix(), from.Unix(), to.Unix(), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ProcessLeader
+	for rows.Next() {
+		var l ProcessLeader
+		var peakAt int64
+		if err := rows.Scan(&l.Name, &l.AvgCPU, &l.PeakCPU, &l.AvgRSS, &l.PeakRSS, &l.Samples, &peakAt); err != nil {
+			return nil, err
+		}
+		l.PeakCPUAt = time.Unix(peakAt, 0)
+		out = append(out, l)
+	}
+	return out, rows.Err()
+}
+
+// ProcPoint is one bucketed per-process history point.
+type ProcPoint struct {
+	Time time.Time `json:"time"`
+	CPU  float64   `json:"cpu"`
+	RSS  int64     `json:"rss"`
+}
+
+// ProcessSeries returns bucketed averages per process name, aligned to
+// the same buckets as History so the UI can stack them.
+func (s *Store) ProcessSeries(ctx context.Context, from, to time.Time, step int64, names []string) (map[string][]ProcPoint, error) {
+	if step < 1 {
+		step = 1
+	}
+	out := map[string][]ProcPoint{}
+	for _, name := range names {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rows, err := s.db.QueryContext(ctx, `
+			SELECT (ts/?)*? AS bucket, AVG(cpu), CAST(AVG(rss) AS INTEGER)
+			FROM (SELECT ts, SUM(cpu_pct) AS cpu, SUM(rss) AS rss FROM process_samples
+				WHERE name=? AND ts>=? AND ts<? GROUP BY ts)
+			GROUP BY bucket ORDER BY bucket`, step, step, name, from.Unix(), to.Unix())
+		if err != nil {
+			return nil, err
+		}
+		var pts []ProcPoint
+		for rows.Next() {
+			var p ProcPoint
+			var bucket int64
+			if err := rows.Scan(&bucket, &p.CPU, &p.RSS); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			p.Time = time.Unix(bucket, 0)
+			pts = append(pts, p)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			return nil, err
+		}
+		rows.Close()
+		out[name] = pts
+	}
+	return out, nil
+}
+
+// ProcessesAt returns the stored snapshot nearest to (not after) t:
+// "what was eating the machine at 14:03?".
+func (s *Store) ProcessesAt(ctx context.Context, t time.Time) ([]model.Process, time.Time, error) {
+	var ts sql.NullInt64
+	err := s.db.QueryRowContext(ctx, `SELECT MAX(ts) FROM process_samples WHERE ts<=?`, t.Unix()).Scan(&ts)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	if !ts.Valid {
+		return nil, time.Time{}, nil
+	}
+	rows, err := s.db.QueryContext(ctx, `SELECT pid,name,cpu_pct,mem_pct,rss FROM process_samples
+		WHERE ts=? ORDER BY cpu_pct DESC`, ts.Int64)
+	if err != nil {
+		return nil, time.Time{}, err
+	}
+	defer rows.Close()
+	var out []model.Process
+	for rows.Next() {
+		var p model.Process
+		if err := rows.Scan(&p.PID, &p.Name, &p.CPUPct, &p.MemPct, &p.RSS); err != nil {
+			return nil, time.Time{}, err
+		}
+		out = append(out, p)
+	}
+	return out, time.Unix(ts.Int64, 0), rows.Err()
+}
+
+// Prune deletes samples older than retentionDays, process samples
+// older than processRetentionDays, and keeps at most keepScans disk
+// scans per root.
+func (s *Store) Prune(retentionDays, processRetentionDays, keepScans int) error {
 	cutoff := time.Now().AddDate(0, 0, -retentionDays).Unix()
 	if _, err := s.db.Exec(`DELETE FROM samples WHERE ts < ?`, cutoff); err != nil {
 		return err
@@ -383,6 +535,10 @@ func (s *Store) Prune(retentionDays, keepScans int) error {
 		return err
 	}
 	if _, err := s.db.Exec(`DELETE FROM events WHERE ts < ?`, cutoff); err != nil {
+		return err
+	}
+	procCutoff := time.Now().AddDate(0, 0, -processRetentionDays).Unix()
+	if _, err := s.db.Exec(`DELETE FROM process_samples WHERE ts < ?`, procCutoff); err != nil {
 		return err
 	}
 	_, err := s.db.Exec(`

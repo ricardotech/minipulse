@@ -17,13 +17,14 @@ import (
 // disk scans on a slower cadence, health checks, alert evaluation and
 // daily pruning. Subscribers (SSE clients) receive every new sample.
 type Collector struct {
-	cfg    *config.Config
-	store  *store.Store
-	sys    *System
-	power  *PowerSource
-	health *HealthWatcher
-	docker *Docker
-	eval   *alert.Evaluator
+	cfg      *config.Config
+	store    *store.Store
+	sys      *System
+	power    *PowerSource
+	health   *HealthWatcher
+	dockerMu sync.Mutex
+	docker   *Docker
+	eval     *alert.Evaluator
 
 	mu       sync.RWMutex
 	latest   model.Sample
@@ -63,10 +64,13 @@ func New(cfg *config.Config, st *store.Store) *Collector {
 // Run blocks until ctx is cancelled.
 func (c *Collector) Run(ctx context.Context) {
 	c.power = NewPowerSource(ctx)
+	c.dockerMu.Lock()
 	c.docker = NewDocker()
+	c.dockerMu.Unlock()
 	go c.health.Run(ctx, 30*time.Second)
 	go c.diskLoop(ctx)
 	go c.pruneLoop(ctx)
+	go c.processLoop(ctx)
 
 	interval := time.Duration(c.cfg.SampleIntervalSeconds) * time.Second
 	c.tick(ctx) // first sample immediately so the UI never starts empty
@@ -128,17 +132,26 @@ func (c *Collector) broadcast(sm model.Sample) {
 	}
 }
 
-// Subscribe registers an SSE consumer. Call the returned func to leave.
-func (c *Collector) Subscribe() (<-chan model.Sample, func()) {
-	ch := make(chan model.Sample, 4)
+// maxSubscribers bounds live SSE connections so leaked or hostile
+// clients cannot pile up goroutines on a LAN-exposed instance.
+const maxSubscribers = 32
+
+// Subscribe registers an SSE consumer. Call the returned func to
+// leave. ok is false when the subscriber cap is reached.
+func (c *Collector) Subscribe() (ch <-chan model.Sample, leave func(), ok bool) {
+	out := make(chan model.Sample, 4)
 	c.mu.Lock()
-	c.subs[ch] = struct{}{}
-	c.mu.Unlock()
-	return ch, func() {
-		c.mu.Lock()
-		delete(c.subs, ch)
+	if len(c.subs) >= maxSubscribers {
 		c.mu.Unlock()
+		return nil, func() {}, false
 	}
+	c.subs[out] = struct{}{}
+	c.mu.Unlock()
+	return out, func() {
+		c.mu.Lock()
+		delete(c.subs, out)
+		c.mu.Unlock()
+	}, true
 }
 
 // Latest returns the most recent sample.
@@ -153,17 +166,27 @@ func (c *Collector) TopProcesses(byCPU bool, limit int) ([]model.Process, error)
 	return c.sys.TopProcesses(byCPU, limit)
 }
 
-// Containers returns Docker containers, or nil when no runtime is up.
+// Containers returns Docker containers, or nil when no runtime is
+// up. Called from HTTP handlers concurrently — dockerMu guards the
+// lazily (re)discovered client.
 func (c *Collector) Containers(ctx context.Context) ([]model.Container, error) {
-	if c.docker == nil {
-		c.docker = NewDocker() // runtime may have started after us
-		if c.docker == nil {
-			return nil, nil
-		}
+	c.dockerMu.Lock()
+	d := c.docker
+	if d == nil {
+		d = NewDocker() // runtime may have started after us
+		c.docker = d
 	}
-	out, err := c.docker.Containers(ctx)
+	c.dockerMu.Unlock()
+	if d == nil {
+		return nil, nil
+	}
+	out, err := d.Containers(ctx)
 	if err != nil {
-		c.docker = nil // socket went away; rediscover next call
+		c.dockerMu.Lock()
+		if c.docker == d {
+			c.docker = nil // socket went away; rediscover next call
+		}
+		c.dockerMu.Unlock()
 		return nil, nil
 	}
 	return out, nil
@@ -261,11 +284,44 @@ func (c *Collector) diskLoop(ctx context.Context) {
 	}
 }
 
+// processLoop persists the top consumers on a slow cadence and logs
+// sustained per-process CPU spikes as events.
+func (c *Collector) processLoop(ctx context.Context) {
+	every := time.Duration(c.cfg.ProcessSampleIntervalSeconds) * time.Second
+	if every <= 0 {
+		return
+	}
+	spikes := NewSpikeTracker(c.cfg.AlertProcessCPUPct,
+		time.Duration(c.cfg.AlertCooldownMinutes)*time.Minute)
+	t := time.NewTicker(every)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case now := <-t.C:
+			all, err := c.sys.TopProcesses(true, 0)
+			if err != nil {
+				slog.Warn("process sample", "err", err)
+				continue
+			}
+			top := MergeTop(all, c.cfg.ProcessTopN)
+			if err := c.store.InsertProcessSample(now, top); err != nil {
+				slog.Warn("store process sample", "err", err)
+			}
+			for _, msg := range spikes.Observe(top, now) {
+				_ = c.store.AddEvent("alert", "Process spike", msg)
+				slog.Info("process spike", "detail", msg)
+			}
+		}
+	}
+}
+
 func (c *Collector) pruneLoop(ctx context.Context) {
 	t := time.NewTicker(24 * time.Hour)
 	defer t.Stop()
 	for {
-		if err := c.store.Prune(c.cfg.RetentionDays, 30); err != nil {
+		if err := c.store.Prune(c.cfg.RetentionDays, c.cfg.ProcessRetentionDays, 30); err != nil {
 			slog.Warn("prune", "err", err)
 		}
 		select {

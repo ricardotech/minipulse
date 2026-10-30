@@ -146,5 +146,12 @@ func (ps *PowerSource) streamOnce(ctx context.Context) error {
 		ps.latest, ps.updated = p, time.Now()
 		ps.mu.Unlock()
 	}
+	if err := scanner.Err(); err != nil {
+		// e.g. a line over the 1 MiB cap: we've stopped reading, so
+		// the child blocks on a full pipe. Kill it or Wait hangs.
+		_ = cmd.Process.Kill()
+		_ = cmd.Wait()
+		return err
+	}
 	return cmd.Wait()
 }

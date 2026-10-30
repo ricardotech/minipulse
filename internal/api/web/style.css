@@ -120,6 +120,28 @@ button:disabled { opacity: .5; cursor: wait; }
 .kpi-big .unit { font-size: 20px; color: var(--muted); margin-left: 7px; letter-spacing: 0; }
 .kpi-mid { font-family: var(--mono); font-size: 21px; font-weight: 550; margin-top: 8px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .kpi-sub { color: var(--faint); font-size: 11.5px; margin-top: 5px; }
+.kpi.clickable { cursor: pointer; }
+.kpi.clickable:hover, .kpi.clickable:focus-visible { border-color: #394048; outline: none; }
+.kpi.clickable.open { border-color: var(--amber); }
+.chev { color: var(--faint); font-size: 11.5px; margin-top: 9px; }
+.kpi.clickable.open .chev { color: var(--amber); }
+
+/* per-process detail drawer */
+.drawer .sub { margin-top: 8px; }
+.drawer table { margin-top: 6px; }
+.tscroll { overflow-x: auto; }
+.tscroll table { min-width: 680px; }
+.tscroll th { white-space: nowrap; padding-right: 14px; }
+.tscroll td { padding-right: 14px; }
+.tscroll th:last-child, .tscroll td:last-child { padding-right: 0; }
+#pd-leaders td:nth-child(4) { white-space: nowrap; }
+.drawer td .bar { display: inline-block; width: 110px; margin: 0; vertical-align: middle; }
+.pd-at { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; margin: 10px 0 4px; background: var(--panel2); font-size: 12.5px; }
+.pd-at b.t { font-family: var(--mono); }
+.legend-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 7px; }
+#pd-leaders tbody tr { cursor: pointer; }
+#pd-leaders tbody tr:hover td { color: var(--amber); }
+#chart-procs { cursor: crosshair; }
 .chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .chip { border: 1px solid var(--line); border-radius: 20px; padding: 2px 9px; font-size: 11.5px; color: var(--muted); }
 .chip b { color: var(--text); font-family: var(--mono); font-weight: 500; }

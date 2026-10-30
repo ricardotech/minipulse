@@ -46,7 +46,7 @@ func main() {
 
 func run(args []string) error {
 	cmd := "serve"
-	if len(args) > 0 && args[0][0] != '-' {
+	if len(args) > 0 && len(args[0]) > 0 && args[0][0] != '-' {
 		cmd, args = args[0], args[1:]
 	}
 	switch cmd {
@@ -79,6 +79,24 @@ func run(args []string) error {
 	}
 }
 
+// validateServeConfig enforces the off-loopback auth policy: a token
+// is required, and a token short enough to brute-force online
+// ("1234") is no token at all. Extracted for testing.
+func validateServeConfig(cfg *config.Config, insecure bool, cfgPath string) error {
+	if cfg.IsLoopback() || insecure {
+		return nil
+	}
+	if cfg.Token == "" {
+		return fmt.Errorf("refusing to listen on %s without an API token: "+
+			"run `minipulse token`, set \"token\" in %s, or bind 127.0.0.1 and use Tailscale Serve", cfg.Addr, cfgPath)
+	}
+	if len(cfg.Token) < 16 {
+		return fmt.Errorf("refusing to listen on %s with a token shorter than 16 characters: "+
+			"run `minipulse token` for a strong one", cfg.Addr)
+	}
+	return nil
+}
+
 func cmdServe(args []string) error {
 	fs := flag.NewFlagSet("serve", flag.ContinueOnError)
 	cfgPath := fs.String("config", config.DefaultPath(), "path to config.json")
@@ -94,9 +112,8 @@ func cmdServe(args []string) error {
 	if *addr != "" {
 		cfg.Addr = *addr
 	}
-	if !cfg.IsLoopback() && cfg.Token == "" && !*insecure {
-		return fmt.Errorf("refusing to listen on %s without an API token: "+
-			"run `minipulse token`, set \"token\" in %s, or bind 127.0.0.1 and use Tailscale Serve", cfg.Addr, *cfgPath)
+	if err := validateServeConfig(cfg, *insecure, *cfgPath); err != nil {
+		return err
 	}
 
 	// An always-on monitoring agent should stay small: cap the Go heap
@@ -116,7 +133,13 @@ func cmdServe(args []string) error {
 	coll := collect.New(cfg, st)
 	go coll.Run(ctx)
 
-	srv := &http.Server{Addr: cfg.Addr, Handler: api.New(cfg, st, coll).Handler()}
+	srv := &http.Server{
+		Addr: cfg.Addr, Handler: api.New(cfg, st, coll).Handler(),
+		// Bound slow-client attacks when exposed beyond loopback.
+		// No WriteTimeout: the SSE stream is long-lived by design.
+		ReadHeaderTimeout: 5 * time.Second,
+		IdleTimeout:       90 * time.Second,
+	}
 	go func() {
 		<-ctx.Done()
 		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)

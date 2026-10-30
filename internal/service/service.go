@@ -4,10 +4,12 @@
 package service
 
 import (
+	"encoding/xml"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 )
 
 // Label is the launchd job label.
@@ -58,15 +60,25 @@ func RenderPlist(binary, configPath string) string {
   <string>%s</string>
 </dict>
 </plist>
-`, Label, binary, configPath, stdout, stderr)
+`, Label, xmlEsc(binary), xmlEsc(configPath), xmlEsc(stdout), xmlEsc(stderr))
+}
+
+// xmlEsc escapes text interpolated into the plist so a path containing
+// & or < cannot break (or inject into) the XML document.
+func xmlEsc(s string) string {
+	var b strings.Builder
+	_ = xml.EscapeText(&b, []byte(s))
+	return b.String()
 }
 
 // Install writes the plist and (re)loads the job.
 func Install(binary, configPath string) error {
 	stdout, _ := logPaths()
-	if err := os.MkdirAll(filepath.Dir(stdout), 0o755); err != nil {
+	// Logs can name processes, roots and spike offenders: owner-only.
+	if err := os.MkdirAll(filepath.Dir(stdout), 0o700); err != nil {
 		return err
 	}
+	_ = os.Chmod(filepath.Dir(stdout), 0o700)
 	plist := PlistPath()
 	if err := os.MkdirAll(filepath.Dir(plist), 0o755); err != nil {
 		return err

@@ -5,10 +5,12 @@
 package alert
 
 import (
-	"bytes"
 	"context"
+	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -117,13 +119,21 @@ func Send(ctx context.Context, webhookURL string, n Notice) error {
 	req.Header.Set("Content-Type", "text/plain; charset=utf-8")
 	resp, err := (&http.Client{Timeout: 10 * time.Second}).Do(req)
 	if err != nil {
-		return err
+		// Unwrap *url.Error: its string embeds the full webhook URL,
+		// and an ntfy topic in the path is a write secret that would
+		// otherwise land in the service log.
+		var ue *url.Error
+		if errors.As(err, &ue) {
+			return fmt.Errorf("webhook send: %w", ue.Err)
+		}
+		return fmt.Errorf("webhook send: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode >= 300 {
-		buf := new(bytes.Buffer)
-		_, _ = buf.ReadFrom(resp.Body)
-		return fmt.Errorf("webhook %s: %s", webhookURL, resp.Status)
+		// Don't put the URL in the error: an ntfy topic in the path
+		// acts as a write secret and errors end up in logs.
+		_, _ = io.Copy(io.Discard, io.LimitReader(resp.Body, 4<<10))
+		return fmt.Errorf("webhook returned %s", resp.Status)
 	}
 	return nil
 }

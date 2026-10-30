@@ -102,7 +102,7 @@ func (d *Docker) Containers(ctx context.Context) ([]model.Container, error) {
 		if len(c.Names) > 0 {
 			name = strings.TrimPrefix(c.Names[0], "/")
 		}
-		mc := model.Container{ID: c.ID[:12], Name: name, Image: c.Image, State: c.State, Status: c.Status}
+		mc := model.Container{ID: shortID(c.ID), Name: name, Image: c.Image, State: c.State, Status: c.Status}
 		if c.State == "running" {
 			var st dockerStats
 			if err := d.get(ctx, "/v1.44/containers/"+c.ID+"/stats?stream=false", &st); err == nil {
@@ -121,6 +121,15 @@ func (d *Docker) Containers(ctx context.Context) ([]model.Container, error) {
 		out = append(out, mc)
 	}
 	return out, nil
+}
+
+// shortID truncates a container ID for display, tolerating short or
+// malformed IDs from a non-Docker socket (never slice unguarded).
+func shortID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 func (d *Docker) get(ctx context.Context, path string, into any) error {

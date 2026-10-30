@@ -148,7 +148,7 @@ async function loadProcs() {
   try {
     const list = await getJSON("/api/processes?sort=" + state.procSort + "&limit=15");
     $("procs").querySelector("tbody").innerHTML = list.map((p) =>
-      `<tr><td title="${esc(p.command || p.name)}">${esc(p.name)}</td><td class="r">${fmtBytes(p.rss)}</td><td class="r">${p.cpu_pct.toFixed(0)}%</td></tr>`).join("");
+      `<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td class="r">${fmtBytes(p.rss)}</td><td class="r">${p.cpu_pct.toFixed(0)}%</td></tr>`).join("");
   } catch (e) {}
 }
 
@@ -314,6 +314,156 @@ function updateSpy() {
 $("main").addEventListener("scroll", () => {
   if (!spyTick) { spyTick = true; requestAnimationFrame(updateSpy); }
 }, { passive: true });
+
+// --- per-process detail drawer (click the CPU / Memory KPI cards) ---
+const PD_COLORS = ["#f0a831", "#5aa2d6", "#4caf7d", "#e05c4b", "#3fb6b2", "#a3b86b", "#c7cedb"];
+const pd = { open: false, tab: "live", sort: "cpu", range: "6h", isolate: null, marker: -1, series: [], timer: null };
+
+function pdSetOpen(open, sort) {
+  if (sort) pd.sort = sort;
+  pd.open = open;
+  $("proc-drawer").hidden = !open;
+  for (const id of ["kpi-cpu", "kpi-mem"]) {
+    const el = $(id);
+    const isThis = open && el.dataset.proc === pd.sort;
+    el.classList.toggle("open", !!isThis);
+    el.setAttribute("aria-expanded", isThis ? "true" : "false");
+    el.querySelector(".chev").textContent = isThis ? "per-process detail ▴" : "per-process detail ▾";
+  }
+  clearInterval(pd.timer);
+  if (!open) return;
+  pdRenderTab();
+  pd.timer = setInterval(() => { if (pd.open) pdRenderTab(); }, pd.tab === "live" ? 3000 : 30000);
+}
+function pdRenderTab() {
+  $("pd-title").textContent = pd.sort === "cpu" ? "Processes — CPU detail" : "Processes — memory detail";
+  $("pd-live").hidden = pd.tab !== "live";
+  $("pd-history").hidden = pd.tab !== "history";
+  $("pd-ranges").hidden = pd.tab !== "history";
+  document.querySelectorAll("#pd-tabs button").forEach((b) => b.classList.toggle("on", b.dataset.tab === pd.tab));
+  if (pd.tab === "live") loadPdLive(); else loadPdHistory();
+}
+async function loadPdLive() {
+  try {
+    const list = await getJSON("/api/processes?sort=" + pd.sort + "&limit=15");
+    const maxCPU = Math.max(100, ...list.map((p) => p.cpu_pct));
+    $("pd-live-table").querySelector("tbody").innerHTML = list.map((p) =>
+      `<tr><td title="${esc(p.name)}">${esc(p.name)}</td><td class="r">${p.pid}</td>` +
+      `<td><span class="bar"><i style="width:${Math.min(100, (p.cpu_pct / maxCPU) * 100)}%"></i></span></td>` +
+      `<td class="r">${p.cpu_pct.toFixed(0)}%</td><td class="r">${fmtBytes(p.rss)}</td><td class="r">${(p.mem_pct || 0).toFixed(1)}%</td></tr>`).join("");
+  } catch (e) {}
+}
+function stackedChart(canvas, series, metric, fmt, markerIdx) {
+  const dpr = window.devicePixelRatio || 1;
+  if (!canvas._h) canvas._h = canvas.height;
+  const w = canvas.clientWidth, h = canvas._h;
+  if (!w || !series.length || !series[0].points.length) return;
+  if (canvas.width !== w * dpr) { canvas.width = w * dpr; canvas.height = h * dpr; }
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, w, h);
+  const n = series[0].points.length;
+  const val = (s, i) => (metric === "cpu" ? s.points[i].cpu : s.points[i].rss) || 0;
+  let max = 1;
+  for (let i = 0; i < n; i++) {
+    let tot = 0;
+    for (const s of series) tot += val(s, i);
+    if (tot > max) max = tot;
+  }
+  const X = (i) => (n === 1 ? w / 2 : (i / (n - 1)) * (w - 2) + 1);
+  const Y = (v) => h - 2 - (v / max) * (h - 18);
+  ctx.strokeStyle = "#262b31"; ctx.beginPath(); ctx.moveTo(0, h - 1); ctx.lineTo(w, h - 1); ctx.stroke();
+  ctx.fillStyle = "#98a0a8"; ctx.font = "10px ui-monospace, monospace";
+  ctx.fillText(fmt(max), 2, 11);
+  const base = new Array(n).fill(0);
+  series.forEach((s, si) => {
+    ctx.beginPath();
+    for (let i = 0; i < n; i++) {
+      const y = Y(base[i] + val(s, i));
+      i ? ctx.lineTo(X(i), y) : ctx.moveTo(X(i), y);
+    }
+    for (let i = n - 1; i >= 0; i--) ctx.lineTo(X(i), Y(base[i]));
+    ctx.closePath();
+    ctx.fillStyle = PD_COLORS[si % PD_COLORS.length] + "55";
+    ctx.fill();
+    ctx.strokeStyle = PD_COLORS[si % PD_COLORS.length]; ctx.lineWidth = 1.2; ctx.stroke();
+    for (let i = 0; i < n; i++) base[i] += val(s, i);
+  });
+  if (markerIdx >= 0 && markerIdx < n) {
+    ctx.strokeStyle = "#ece9e2"; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(X(markerIdx), 12); ctx.lineTo(X(markerIdx), h - 1); ctx.stroke();
+  }
+}
+async function loadPdHistory() {
+  try {
+    const d = await getJSON(`/api/processes/history?range=${pd.range}&sort=${pd.sort}&limit=7`);
+    pd.series = pd.isolate ? d.series.filter((s) => s.name === pd.isolate) : d.series;
+    if (pd.isolate && !pd.series.length) pd.series = d.series;
+    if (d.sample_interval_s != null) $("pd-interval").textContent = d.sample_interval_s;
+    const fmt = pd.sort === "cpu" ? (v) => v.toFixed(0) + "% cpu" : fmtBytes;
+    stackedChart($("chart-procs"), pd.series, pd.sort === "cpu" ? "cpu" : "rss", fmt, pd.marker);
+    $("pd-leaders").querySelector("tbody").innerHTML = (d.leaders || []).map((l, i) =>
+      `<tr data-name="${esc(l.name)}"><td><span class="legend-dot" style="background:${PD_COLORS[i % PD_COLORS.length]}"></span>${esc(l.name)}</td>` +
+      `<td class="r">${l.avg_cpu.toFixed(0)}%</td><td class="r">${l.peak_cpu.toFixed(0)}%</td>` +
+      `<td>${new Date(l.peak_cpu_at).toLocaleString()}</td>` +
+      `<td class="r">${fmtBytes(l.avg_rss)}</td><td class="r">${fmtBytes(l.peak_rss)}</td></tr>`).join("")
+      || `<tr><td colspan="6" class="sub">no process history in this window yet (samples land every ${d.sample_interval_s || 30}s)</td></tr>`;
+    document.querySelectorAll("#pd-leaders tbody tr[data-name]").forEach((tr) =>
+      tr.addEventListener("click", () => {
+        pd.isolate = pd.isolate === tr.dataset.name ? null : tr.dataset.name;
+        pd.marker = -1;
+        loadPdHistory();
+      }));
+  } catch (e) {}
+}
+$("chart-procs").addEventListener("click", async (ev) => {
+  if (!pd.series.length || !pd.series[0].points.length) return;
+  const rect = ev.target.getBoundingClientRect();
+  const frac = Math.min(1, Math.max(0, (ev.clientX - rect.left) / rect.width));
+  const idx = Math.round(frac * (pd.series[0].points.length - 1));
+  pd.marker = idx;
+  const t = pd.series[0].points[idx].time;
+  loadPdHistory();
+  try {
+    const d = await getJSON("/api/processes/at?ts=" + Math.floor(Date.parse(t) / 1000));
+    const box = $("pd-at");
+    box.hidden = false;
+    const when = d.snapshot_at ? new Date(d.snapshot_at).toLocaleString() : new Date(t).toLocaleString();
+    box.innerHTML = `<b class="t">${when}</b> — ` +
+      (d.processes.length
+        ? d.processes.slice(0, 8).map((p) => `${esc(p.name)} <b>${p.cpu_pct.toFixed(0)}%</b> cpu · ${fmtBytes(p.rss)}`).join(" &nbsp;|&nbsp; ")
+        : "no snapshot stored at or before this time (history starts when MiniPulse started)");
+  } catch (e) {}
+});
+for (const id of ["kpi-cpu", "kpi-mem"]) {
+  const el = $(id);
+  const toggle = () => {
+    if (pd.open && pd.sort === el.dataset.proc) pdSetOpen(false);
+    else pdSetOpen(true, el.dataset.proc);
+  };
+  el.addEventListener("click", toggle);
+  el.addEventListener("keydown", (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); toggle(); } });
+}
+$("pd-close").addEventListener("click", () => pdSetOpen(false));
+$("pd-tabs").addEventListener("click", (e) => {
+  if (!e.target.dataset.tab) return;
+  pd.tab = e.target.dataset.tab;
+  pdSetOpen(true); // re-arms timer for the tab cadence
+});
+$("pd-ranges").addEventListener("click", (e) => {
+  if (!e.target.dataset.range) return;
+  pd.range = e.target.dataset.range;
+  pd.marker = -1;
+  document.querySelectorAll("#pd-ranges button").forEach((b) => b.classList.toggle("on", b === e.target));
+  loadPdHistory();
+});
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && pd.open) pdSetOpen(false); });
+
+// The server may have turned ?token= into a cookie on this very
+// document request; remove it from the visible URL either way.
+if (new URLSearchParams(location.search).has("token")) {
+  history.replaceState(null, "", location.pathname);
+}
 
 // First sample immediately, then paced refreshes.
 loadOverview(); loadHistory(); loadEnergy(); loadProcs(); loadContainers(); loadServices(); loadEvents(); loadDisk();

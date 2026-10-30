@@ -27,9 +27,19 @@ type System struct {
 	lastDiskRead, lastDiskWr uint64
 	lastTime                 time.Time
 
-	procMu    sync.Mutex
-	procCache []model.Process
-	procAt    time.Time
+	procMu     sync.Mutex
+	procCache  []model.Process
+	procAt     time.Time
+	procPrev   map[int32]procMark
+	lastWalkAt time.Time
+}
+
+// procMark remembers a process's cumulative CPU time at the last walk
+// so the next walk can compute a true current rate.
+type procMark struct {
+	total  float64 // user+system seconds
+	at     time.Time
+	create int64 // ms, detects PID reuse
 }
 
 func NewSystem() *System { return &System{} }
@@ -208,7 +218,7 @@ func (s *System) TopProcesses(byCPU bool, limit int) ([]model.Process, error) {
 	s.procMu.Lock()
 	defer s.procMu.Unlock()
 	if time.Since(s.procAt) > 2*time.Second || s.procCache == nil {
-		procs, err := walkProcesses()
+		procs, err := s.walkProcesses()
 		if err != nil {
 			return nil, err
 		}
@@ -228,11 +238,19 @@ func (s *System) TopProcesses(byCPU bool, limit int) ([]model.Process, error) {
 	return out, nil
 }
 
-func walkProcesses() ([]model.Process, error) {
+// walkProcesses lists all processes. CPU % is a true rate between
+// the previous walk and this one (100 = one full core). Calling
+// gopsutil's CPUPercent() on a fresh Process object instead yields a
+// lifetime average, which inflates short-lived bursty processes and
+// hides what is hot *right now* — measured live as a group of node
+// processes "averaging" 880% summed while barely active.
+func (s *System) walkProcesses() ([]model.Process, error) {
 	ps, err := process.Processes()
 	if err != nil {
 		return nil, err
 	}
+	now := time.Now()
+	next := make(map[int32]procMark, len(ps))
 	out := make([]model.Process, 0, len(ps))
 	for _, p := range ps {
 		name, err := p.Name()
@@ -240,23 +258,64 @@ func walkProcesses() ([]model.Process, error) {
 			continue
 		}
 		mp := model.Process{PID: p.Pid, Name: name}
-		mp.CPUPct, _ = p.CPUPercent()
+		mp.CPUPct = s.cpuRate(p, now, next)
 		mp.MemPct, _ = p.MemoryPercent()
 		if mi, err := p.MemoryInfo(); err == nil && mi != nil {
 			mp.RSS = mi.RSS
 		}
-		mp.User, _ = p.Username()
-		if cmd, err := p.Cmdline(); err == nil {
-			mp.Command = truncate(cmd, 160)
-		}
 		out = append(out, mp)
 	}
+	s.procPrev = next
+	s.lastWalkAt = now
 	return out, nil
 }
 
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
+// cpuRate diffs cumulative CPU time against the previous walk.
+func (s *System) cpuRate(p *process.Process, now time.Time, next map[int32]procMark) float64 {
+	times, err := p.Times()
+	if err != nil || times == nil {
+		return 0 // no fallback to CPUPercent(): that is the lifetime average this code exists to avoid
 	}
-	return s[:n] + "…"
+	total := times.User + times.System
+	create, _ := p.CreateTime()
+	next[p.Pid] = procMark{total: total, at: now, create: create}
+	var prev *procMark
+	if m, ok := s.procPrev[p.Pid]; ok {
+		prev = &m
+	}
+	pct := rateFromMark(prev, total, create, now, s.lastWalkAt)
+	if max := float64(runtime.NumCPU()) * 100; pct > max {
+		pct = max
+	}
+	if pct < 0 {
+		pct = 0
+	}
+	return pct
+}
+
+// rateFromMark is the pure rate calculation. On first sight there is
+// no baseline: only a process born *since the previous walk* gets its
+// lifetime average (a fair proxy for a newborn); a pre-existing
+// process reports 0 until the next walk. Using the lifetime average
+// for old processes is what made long-dead bursts look current —
+// observed live as idle node workers "using" ~100% each.
+func rateFromMark(prev *procMark, total float64, createMs int64, now, lastWalk time.Time) float64 {
+	if lastWalk.IsZero() {
+		return 0 // very first walk: no baseline for anyone; "born after zero time" would make every old process a newborn
+	}
+	if prev != nil && createMs > 0 && prev.create == createMs {
+		if dt := now.Sub(prev.at).Seconds(); dt > 0 && total >= prev.total {
+			return (total - prev.total) / dt * 100
+		}
+		return 0
+	}
+	if createMs > 0 {
+		born := time.UnixMilli(createMs)
+		if born.After(lastWalk) {
+			if age := now.Sub(born).Seconds(); age > 0 {
+				return total / age * 100
+			}
+		}
+	}
+	return 0
 }

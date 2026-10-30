@@ -77,8 +77,8 @@ func TestParseLaunchctl(t *testing.T) {
 
 func TestParseLsof(t *testing.T) {
 	out := "COMMAND PID USER FD TYPE DEVICE SIZE/OFF NODE NAME\n" +
-		"postgres 1305 ricardo 7u IPv4 0xabc 0t0 TCP 127.0.0.1:5432 (LISTEN)\n" +
-		"redis-ser 1297 ricardo 12u IPv6 0xdef 0t0 TCP [::1]:6379 (LISTEN)\n"
+		"postgres 1305 alice 7u IPv4 0xabc 0t0 TCP 127.0.0.1:5432 (LISTEN)\n" +
+		"redis-ser 1297 alice 12u IPv6 0xdef 0t0 TCP [::1]:6379 (LISTEN)\n"
 	got := ParseLsof(out)
 	if len(got) != 2 || got[0].Port != 5432 || got[1].Port != 6379 || got[0].Process != "postgres" {
 		t.Errorf("got %+v", got)
