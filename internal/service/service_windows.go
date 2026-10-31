@@ -69,7 +69,11 @@ func restrictProgramData() error {
 	if err := os.MkdirAll(dir, 0o755); err != nil {
 		return err
 	}
-	sd, err := windows.SecurityDescriptorFromString("O:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
+	// Owner goes to Administrators, not SYSTEM: assigning SYSTEM
+	// as owner needs SeRestorePrivilege, while an admin may
+	// always assign a group they belong to. Either way the
+	// pre-planter stops being owner and loses implicit WRITE_DAC.
+	sd, err := windows.SecurityDescriptorFromString("O:BAD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)")
 	if err != nil {
 		return fmt.Errorf("build security descriptor: %w", err)
 	}
@@ -134,7 +138,7 @@ func Install(binary, configPath string) error {
 	// only kept on a reinstall over a live service record: with no
 	// service installed, a config found in %ProgramData% is foreign
 	// (standard users can create directories there, and a directory
-	// left behind by an uninstall is already SYSTEM-owned, so
+	// left behind by an uninstall is already admin-owned, so
 	// ownership alone proves nothing).
 	cfgPath, err := prepareServiceConfig(configPath, old != nil)
 	if err != nil {
