@@ -42,6 +42,7 @@ func (s *Server) Handler() http.Handler {
 		writeJSON(w, http.StatusOK, map[string]any{"ok": true})
 	})
 	mux.Handle("GET /api/overview", s.auth(http.HandlerFunc(s.overview)))
+	mux.Handle("GET /api/mini", s.auth(http.HandlerFunc(s.mini)))
 	mux.Handle("GET /api/stream", s.auth(http.HandlerFunc(s.stream)))
 	mux.Handle("GET /api/history", s.auth(http.HandlerFunc(s.history)))
 	mux.Handle("GET /api/processes", s.auth(http.HandlerFunc(s.processes)))
@@ -216,6 +217,51 @@ func (s *Server) overview(w http.ResponseWriter, r *http.Request) {
 		"scan_running":  s.coll.ScanRunning(),
 		"health":        s.coll.HealthResults(),
 	})
+}
+
+// mini is the glanceable contract for weak clients (menu-bar and
+// notch companions, ESP32 displays from issue #3): one flat object
+// from the latest sample, no per-core/volume payloads and no store
+// query per call, so polling it every few seconds stays free.
+// ?top=1 adds the current top-CPU process (2s-cached walk).
+func (s *Server) mini(w http.ResponseWriter, r *http.Request) {
+	latest, ok := s.coll.Latest()
+	if !ok {
+		writeJSON(w, http.StatusServiceUnavailable, map[string]any{"error": "warming up"})
+		return
+	}
+	var top *model.Process
+	if r.URL.Query().Get("top") == "1" {
+		if procs, err := s.coll.TopProcesses(true, 1); err == nil && len(procs) > 0 {
+			top = &procs[0]
+		}
+	}
+	writeJSON(w, http.StatusOK, miniView(latest, top))
+}
+
+// miniView flattens a Sample into the /api/mini payload. Field names
+// match model.Sample/model.Power so clients need one vocabulary.
+// power_available is explicit: when false, watt fields are 0 and
+// clients must render "—", never a fake 0W reading.
+func miniView(sm model.Sample, top *model.Process) map[string]any {
+	out := map[string]any{
+		"time":            sm.Time,
+		"sys_w":           sm.Power.SysW,
+		"soc_w":           sm.Power.SoCW,
+		"cpu_pct":         sm.CPUPct,
+		"mem_pct":         sm.MemPct,
+		"cpu_temp_c":      sm.Power.CPUTempC,
+		"gpu_temp_c":      sm.Power.GPUTempC,
+		"fan_rpm":         sm.Power.FanRPM,
+		"power_available": sm.Power.Available,
+		"wh_total":        sm.WhTotal,
+	}
+	if top != nil {
+		out["top"] = map[string]any{
+			"pid": top.PID, "name": top.Name, "cpu_pct": top.CPUPct, "mem_pct": top.MemPct,
+		}
+	}
+	return out
 }
 
 // stream is the SSE feed: the current sample is sent immediately,

@@ -150,6 +150,7 @@ Everything the UI shows, as JSON, plus a live SSE stream:
 | Endpoint | What |
 |---|---|
 | `GET /api/overview` | host info + latest sample + energy today |
+| `GET /api/mini` · `?top=1` | one flat glanceable object (watts, CPU/mem %, temps, fan) for menu-bar/notch/ESP32 clients; `power_available:false` means show "—", not 0W |
 | `GET /api/stream` | SSE — one event per sample, server-paced |
 | `GET /api/history?range=1h\|6h\|24h\|7d\|30d` | bucketed system history |
 | `GET /api/processes?sort=mem\|cpu&limit=15` | live top processes (CPU % per core: 100 = 1 core) |
