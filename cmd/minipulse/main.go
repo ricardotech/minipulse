@@ -22,9 +22,7 @@ import (
 	"log/slog"
 	"net/http"
 	"os"
-	"os/signal"
 	"runtime/debug"
-	"syscall"
 	"time"
 
 	"github.com/ricardotech/minipulse/internal/api"
@@ -127,31 +125,32 @@ func cmdServe(args []string) error {
 	}
 	defer st.Close()
 
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
+	// RunServe owns the lifetime: signals in the foreground, the
+	// Service Control Manager when Windows launched us as a service.
+	return service.RunServe(func(ctx context.Context) error {
+		coll := collect.New(cfg, st)
+		go coll.Run(ctx)
 
-	coll := collect.New(cfg, st)
-	go coll.Run(ctx)
+		srv := &http.Server{
+			Addr: cfg.Addr, Handler: api.New(cfg, st, coll).Handler(),
+			// Bound slow-client attacks when exposed beyond loopback.
+			// No WriteTimeout: the SSE stream is long-lived by design.
+			ReadHeaderTimeout: 5 * time.Second,
+			IdleTimeout:       90 * time.Second,
+		}
+		go func() {
+			<-ctx.Done()
+			shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			_ = srv.Shutdown(shutCtx)
+		}()
 
-	srv := &http.Server{
-		Addr: cfg.Addr, Handler: api.New(cfg, st, coll).Handler(),
-		// Bound slow-client attacks when exposed beyond loopback.
-		// No WriteTimeout: the SSE stream is long-lived by design.
-		ReadHeaderTimeout: 5 * time.Second,
-		IdleTimeout:       90 * time.Second,
-	}
-	go func() {
-		<-ctx.Done()
-		shutCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		_ = srv.Shutdown(shutCtx)
-	}()
-
-	slog.Info("MiniPulse listening", "addr", "http://"+cfg.Addr, "version", version, "data", cfg.DataDir)
-	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-		return err
-	}
-	return nil
+		slog.Info("MiniPulse listening", "addr", "http://"+cfg.Addr, "version", version, "data", cfg.DataDir)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	})
 }
 
 func cmdService(args []string) error {

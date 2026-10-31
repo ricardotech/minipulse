@@ -3,11 +3,13 @@ package collect
 import "os"
 
 // rootMount is the boot volume's mountpoint, sorted first.
+// gopsutil reports Windows mountpoints as a bare drive ("C:"),
+// without the trailing backslash.
 func rootMount() string {
 	if d := os.Getenv("SystemDrive"); d != "" {
-		return d + `\`
+		return d
 	}
-	return `C:\`
+	return "C:"
 }
 
 // isRealMount: disk.Partitions(false) on Windows already yields only
