@@ -3,9 +3,10 @@ module github.com/ricardotech/minipulse
 go 1.27.3
 
 require (
+	github.com/Microsoft/go-winio v0.6.4
 	github.com/mattn/go-sqlite3 v1.14.52
 	github.com/shirou/gopsutil/v4 v4.26.9
-	golang.org/x/sys v0.48.0
+	golang.org/x/sys v0.49.0
 )
 
 require (
