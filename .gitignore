@@ -4,3 +4,7 @@
 *.db-shm
 .DS_Store
 /dist/
+
+# Swift companion build products
+companion/.build/
+companion/*.app/

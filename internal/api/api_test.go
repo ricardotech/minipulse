@@ -37,7 +37,7 @@ func TestMiniRouteAuthAndWarmingUp(t *testing.T) {
 func TestMiniViewFlattensGlanceableFields(t *testing.T) {
 	sm := model.Sample{
 		Time: time.Date(2026, 10, 31, 10, 0, 0, 0, time.UTC), CPUPct: 11.5, MemPct: 56,
-		WhTotal: 196.1, CPUPerCore: []float64{1, 2}, Volumes: []model.Volume{{Mount: "/"}},
+		WhTotal: 196.1, CPUPerCore: []float64{1, 2}, Volumes: []model.Volume{{Mount: "/", Total: 200 << 30, Used: 130 << 30, Free: 70 << 30, UsedPct: 65}},
 		Power: model.Power{Available: true, SysW: 31.2, SoCW: 8.4, CPUTempC: 63, GPUTempC: 58, FanRPM: 1000},
 	}
 	out := miniView(sm, nil)
@@ -49,6 +49,7 @@ func TestMiniViewFlattensGlanceableFields(t *testing.T) {
 	for k, want := range map[string]float64{
 		"sys_w": 31.2, "soc_w": 8.4, "cpu_pct": 11.5, "mem_pct": 56,
 		"cpu_temp_c": 63, "gpu_temp_c": 58, "fan_rpm": 1000, "wh_total": 196.1,
+		"disk_pct": 65, "disk_free_bytes": 70 << 30, "disk_total_bytes": 200 << 30,
 	} {
 		if got[k] != want {
 			t.Errorf("%s = %v, want %v", k, got[k], want)

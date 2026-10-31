@@ -1,0 +1,38 @@
+name: Companion
+
+on:
+  push:
+    paths:
+      - "companion/**"
+      - "examples/swiftbar/**"
+      - "internal/api/**"
+      - "internal/model/**"
+      - ".github/workflows/companion.yml"
+  pull_request:
+    paths:
+      - "companion/**"
+      - "examples/swiftbar/**"
+      - "internal/api/**"
+      - "internal/model/**"
+      - ".github/workflows/companion.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build-test:
+    runs-on: macos-latest
+    defaults:
+      run:
+        working-directory: companion
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: swift build -c release
+      - name: Test
+        run: swift test
+      - name: Assemble app bundle
+        run: make app
+      - name: SwiftBar plugin tests
+        working-directory: examples/swiftbar
+        run: python3 -m unittest test_minipulse_plugin -v
