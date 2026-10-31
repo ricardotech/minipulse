@@ -8,6 +8,7 @@ public enum MenuBarMetric: String, CaseIterable, Codable, Sendable {
     case watts
     case cpu
     case memory
+    case disk
     case cpuTemp
     case fan
 
@@ -16,6 +17,7 @@ public enum MenuBarMetric: String, CaseIterable, Codable, Sendable {
         case .watts: return "Watts"
         case .cpu: return "CPU"
         case .memory: return "Memory"
+        case .disk: return "Disk"
         case .cpuTemp: return "CPU temp"
         case .fan: return "Fan"
         }
@@ -34,6 +36,8 @@ public enum MenuBarMetric: String, CaseIterable, Codable, Sendable {
             return String(format: "%.0f%%", s.cpuPct)
         case .memory:
             return String(format: "%.0f%%", s.memPct)
+        case .disk:
+            return s.diskPct.map { String(format: "%.0f%%", $0) }
         case .cpuTemp:
             return s.powerAvailable ? String(format: "%.0f°", s.cpuTempC) : "—°"
         case .fan:
@@ -48,6 +52,7 @@ public enum MenuBarMetric: String, CaseIterable, Codable, Sendable {
         switch self {
         case .cpu: return "CPU \(v)"
         case .memory: return "MEM \(v)"
+        case .disk: return "DISK \(v)"
         case .fan: return "\(v) rpm"
         case .watts, .cpuTemp: return v
         }

@@ -3,11 +3,16 @@ import XCTest
 
 final class CoreTests: XCTestCase {
     func testMiniDecodeAndWattsLabel() throws {
-        let json = #"{"sys_w":31.2,"soc_w":8.4,"cpu_pct":11.5,"mem_pct":56,"cpu_temp_c":63,"gpu_temp_c":58,"fan_rpm":1000,"power_available":true,"wh_total":196.1,"top":{"name":"node","cpu_pct":120}}"#
+        let json = #"{"sys_w":31.2,"soc_w":8.4,"cpu_pct":11.5,"mem_pct":56,"cpu_temp_c":63,"gpu_temp_c":58,"fan_rpm":1000,"power_available":true,"wh_total":196.1,"disk_pct":65,"disk_free_bytes":70000000000,"disk_total_bytes":200000000000,"top":{"name":"node","cpu_pct":120}}"#
         let s = try MiniPulseJSON.decodeMini(Data(json.utf8))
         XCTAssertEqual(s.sysW, 31.2, accuracy: 0.001)
         XCTAssertEqual(s.wattsLabel, "31W")
         XCTAssertEqual(s.topName, "node")
+        XCTAssertEqual(s.diskPct, 65)
+        XCTAssertEqual(s.diskLabel, "70.0 GB free of 200 GB")
+        // An older daemon without the disk keys still decodes.
+        let old = #"{"sys_w":1,"soc_w":1,"cpu_pct":1,"mem_pct":1,"cpu_temp_c":1,"gpu_temp_c":1,"fan_rpm":1,"power_available":true,"wh_total":1}"#
+        XCTAssertNil(try MiniPulseJSON.decodeMini(Data(old.utf8)).diskPct)
     }
 
     func testUnavailablePowerIsDashNeverZeroWatts() {
@@ -20,10 +25,13 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(SSEParser.sample(fromLine: ": heartbeat"))
         XCTAssertNil(SSEParser.sample(fromLine: ""))
         XCTAssertNil(SSEParser.sample(fromLine: "data: not-json"))
-        let line = #"data: {"cpu_pct":50,"mem_pct":60,"wh_total":10,"power":{"available":true,"sys_w":42,"soc_w":20,"cpu_temp_c":70,"gpu_temp_c":65,"fan_rpm":1200}}"#
+        let line = #"data: {"cpu_pct":50,"mem_pct":60,"wh_total":10,"volumes":[{"mount":"/","total":200000000000,"free":70000000000,"used_pct":65}],"power":{"available":true,"sys_w":42,"soc_w":20,"cpu_temp_c":70,"gpu_temp_c":65,"fan_rpm":1200}}"#
         let s = SSEParser.sample(fromLine: line)
         XCTAssertEqual(s?.sysW, 42)
         XCTAssertEqual(s?.cpuPct, 50)
+        // Stream samples carry the full volume list; the first is root.
+        XCTAssertEqual(s?.diskPct, 65)
+        XCTAssertEqual(s?.diskLabel, "70.0 GB free of 200 GB")
     }
 
     func testCadenceMonotonicAndClamped() {
@@ -61,6 +69,12 @@ final class CoreTests: XCTestCase {
                        "18W · MEM 61%")
         XCTAssertEqual(MenuBarText.build(sample: s, enabled: [.fan, .cpuTemp]),
                        "64° · 1200 rpm")
+        // Disk sits after memory in canonical order and drops out
+        // entirely when the daemon sent no volume data.
+        var withDisk = s; withDisk.diskPct = 65
+        XCTAssertEqual(MenuBarText.build(sample: withDisk, enabled: [.disk, .memory, .cpu]),
+                       "CPU 23% · MEM 61% · DISK 65%")
+        XCTAssertEqual(MenuBarText.build(sample: s, enabled: [.disk]), "")
         XCTAssertEqual(MenuBarText.build(sample: nil, enabled: MenuBarText.defaultMetrics), "")
         XCTAssertEqual(MenuBarText.build(sample: s, enabled: []), "")
         // Fanless Mac: fan metric drops out instead of showing 0.

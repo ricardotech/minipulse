@@ -261,6 +261,14 @@ func miniView(sm model.Sample, top *model.Process) map[string]any {
 		"power_available": sm.Power.Available,
 		"wh_total":        sm.WhTotal,
 	}
+	// Root-volume storage at a glance (Volumes is root-first); the
+	// full volume list stays out — weak clients get three scalars.
+	if len(sm.Volumes) > 0 {
+		v := sm.Volumes[0]
+		out["disk_pct"] = v.UsedPct
+		out["disk_free_bytes"] = v.Free
+		out["disk_total_bytes"] = v.Total
+	}
 	if top != nil {
 		out["top"] = map[string]any{
 			"pid": top.PID, "name": top.Name, "cpu_pct": top.CPUPct, "mem_pct": top.MemPct,

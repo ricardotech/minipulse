@@ -40,7 +40,7 @@ enum PulseFrames {
 }
 
 @MainActor
-final class StatusItemController: NSObject {
+final class StatusItemController: NSObject, NSPopoverDelegate {
     private let store: Store
     private let item: NSStatusItem
     private let popover = NSPopover()
@@ -59,7 +59,12 @@ final class StatusItemController: NSObject {
         item.button?.font = .monospacedDigitSystemFont(ofSize: 12, weight: .medium)
         item.button?.target = self
         item.button?.action = #selector(togglePopover)
-        popover.behavior = .transient
+        // Not .transient: an LSUIElement app never becomes the
+        // active app, so transient's close-on-outside-interaction
+        // never fires (and it fights the button toggle when it
+        // does). Outside clicks are handled by monitors below.
+        popover.behavior = .applicationDefined
+        popover.delegate = self
         popover.contentViewController = NSHostingController(
             rootView: PopoverView(store: store, openPrefs: { [weak self] in
                 self?.popover.performClose(nil)
@@ -126,7 +131,49 @@ final class StatusItemController: NSObject {
         } else {
             // PopoverView.onAppear is the single refresh trigger.
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            installClickMonitors()
         }
+    }
+
+    func popoverDidClose(_ notification: Notification) {
+        removeClickMonitors()
+    }
+
+    // Dismiss on any click outside the popover (Esc too), like
+    // every other menu-bar app. The status button is excluded:
+    // its action toggles.
+    private var clickMonitors: [Any] = []
+
+    private func installClickMonitors() {
+        removeClickMonitors()
+        let global = NSEvent.addGlobalMonitorForEvents(
+            matching: [.leftMouseDown, .rightMouseDown]) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.popover.isShown else { return }
+                let p = NSEvent.mouseLocation
+                if let b = self.buttonInScreenCoords, b.contains(p) { return }
+                if let w = self.popover.contentViewController?.view.window, w.frame.contains(p) { return }
+                self.popover.performClose(nil)
+            }
+        }
+        let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
+            if e.keyCode == 53 { // Esc
+                Task { @MainActor in self?.popover.performClose(nil) }
+                return nil
+            }
+            return e
+        }
+        clickMonitors = [global, local].compactMap { $0 }
+    }
+
+    private func removeClickMonitors() {
+        clickMonitors.forEach { NSEvent.removeMonitor($0) }
+        clickMonitors = []
+    }
+
+    private var buttonInScreenCoords: NSRect? {
+        guard let button = item.button, let win = button.window else { return nil }
+        return win.convertToScreen(button.convert(button.bounds, to: nil))
     }
 }
 

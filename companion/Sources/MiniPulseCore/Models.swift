@@ -13,6 +13,11 @@ public struct MiniSample: Equatable, Sendable {
     public var fanRPM: Int
     public var powerAvailable: Bool
     public var whTotal: Double
+    /// Root-volume storage; nil when the daemon has no volume data
+    /// yet (or predates the disk fields in /api/mini).
+    public var diskPct: Double?
+    public var diskFreeBytes: UInt64?
+    public var diskTotalBytes: UInt64?
     public var topName: String?
     public var topCPUPct: Double?
     /// When the daemon COLLECTED this sample. Freshness must be
@@ -24,11 +29,13 @@ public struct MiniSample: Equatable, Sendable {
     public init(sysW: Double, socW: Double, cpuPct: Double, memPct: Double,
                 cpuTempC: Double, gpuTempC: Double, fanRPM: Int,
                 powerAvailable: Bool, whTotal: Double,
-                topName: String? = nil, topCPUPct: Double? = nil, time: Date? = nil) {
+                topName: String? = nil, topCPUPct: Double? = nil, time: Date? = nil,
+                diskPct: Double? = nil, diskFreeBytes: UInt64? = nil, diskTotalBytes: UInt64? = nil) {
         self.sysW = sysW; self.socW = socW; self.cpuPct = cpuPct; self.memPct = memPct
         self.cpuTempC = cpuTempC; self.gpuTempC = gpuTempC; self.fanRPM = fanRPM
         self.powerAvailable = powerAvailable; self.whTotal = whTotal
         self.topName = topName; self.topCPUPct = topCPUPct; self.time = time
+        self.diskPct = diskPct; self.diskFreeBytes = diskFreeBytes; self.diskTotalBytes = diskTotalBytes
     }
 
     /// Watts label for glanceable surfaces. When the daemon reports
@@ -36,6 +43,15 @@ public struct MiniSample: Equatable, Sendable {
     public var wattsLabel: String {
         guard powerAvailable else { return "—W" }
         return sysW >= 10 ? String(format: "%.0fW", sysW) : String(format: "%.1fW", sysW)
+    }
+
+    /// "79.9 GB free of 228 GB" for the popover; nil without disk data.
+    public var diskLabel: String? {
+        guard let free = diskFreeBytes else { return nil }
+        let gb = 1_000_000_000.0
+        let f = String(format: "%.1f GB free", Double(free) / gb)
+        guard let total = diskTotalBytes, total > 0 else { return f }
+        return f + String(format: " of %.0f GB", Double(total) / gb)
     }
 }
 
@@ -66,6 +82,7 @@ public enum MiniPulseJSON {
         var sys_w: Double; var soc_w: Double; var cpu_pct: Double; var mem_pct: Double
         var cpu_temp_c: Double; var gpu_temp_c: Double; var fan_rpm: Int
         var power_available: Bool; var wh_total: Double
+        var disk_pct: Double?; var disk_free_bytes: UInt64?; var disk_total_bytes: UInt64?
         var time: String?
         var top: Top?
         struct Top: Decodable { var name: String; var cpu_pct: Double }
@@ -74,7 +91,9 @@ public enum MiniPulseJSON {
     private struct StreamPayload: Decodable {
         var cpu_pct: Double; var mem_pct: Double; var wh_total: Double
         var time: String?
+        var volumes: [Volume]?
         var power: Power
+        struct Volume: Decodable { var used_pct: Double; var free: UInt64; var total: UInt64 }
         struct Power: Decodable {
             var available: Bool; var sys_w: Double; var soc_w: Double
             var cpu_temp_c: Double; var gpu_temp_c: Double; var fan_rpm: Int
@@ -87,7 +106,9 @@ public enum MiniPulseJSON {
                           cpuTempC: p.cpu_temp_c, gpuTempC: p.gpu_temp_c, fanRPM: p.fan_rpm,
                           powerAvailable: p.power_available, whTotal: p.wh_total,
                           topName: p.top?.name, topCPUPct: p.top?.cpu_pct,
-                          time: parseDaemonTime(p.time))
+                          time: parseDaemonTime(p.time),
+                          diskPct: p.disk_pct, diskFreeBytes: p.disk_free_bytes,
+                          diskTotalBytes: p.disk_total_bytes)
     }
 
     public static func decodeStreamSample(_ data: Data) throws -> MiniSample {
@@ -96,6 +117,9 @@ public enum MiniPulseJSON {
                           memPct: p.mem_pct, cpuTempC: p.power.cpu_temp_c,
                           gpuTempC: p.power.gpu_temp_c, fanRPM: p.power.fan_rpm,
                           powerAvailable: p.power.available, whTotal: p.wh_total,
-                          time: parseDaemonTime(p.time))
+                          time: parseDaemonTime(p.time),
+                          diskPct: p.volumes?.first?.used_pct,
+                          diskFreeBytes: p.volumes?.first?.free,
+                          diskTotalBytes: p.volumes?.first?.total)
     }
 }

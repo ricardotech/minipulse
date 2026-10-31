@@ -18,6 +18,9 @@ struct StatsRows: View {
                 }
                 MetricBar(label: "CPU", pct: s.cpuPct)
                 MetricBar(label: "MEM", pct: s.memPct)
+                if let disk = s.diskPct {
+                    MetricBar(label: "DISK", pct: disk)
+                }
                 Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 4) {
                     if s.powerAvailable {
                         row("Temps", String(format: "CPU %.0f°C · GPU %.0f°C", s.cpuTempC, s.gpuTempC))
@@ -26,6 +29,7 @@ struct StatsRows: View {
                         row("Power", "— (unavailable)")
                     }
                     row("Energy", String(format: "%.1f Wh total", s.whTotal))
+                    if let storage = s.diskLabel { row("Storage", storage) }
                 }
                 .font(.system(size: 12))
             }
@@ -173,13 +177,16 @@ struct PrefsView: View {
             Toggle("Animated pulse icon in the menu bar", isOn: $store.showRunner)
             VStack(alignment: .leading, spacing: 5) {
                 Text("Menu bar indicators").font(.system(size: 12, weight: .medium))
-                HStack(spacing: 12) {
+                // One toggle per row: side-by-side checkboxes squeeze
+                // the labels unreadable in a fixed-width form.
+                VStack(alignment: .leading, spacing: 6) {
                     ForEach(MenuBarMetric.allCases, id: \.rawValue) { metric in
                         Toggle(metric.label, isOn: Binding(
                             get: { store.enabledMetrics.contains(metric) },
                             set: { _ in store.toggleMetric(metric) }))
                             .toggleStyle(.checkbox)
                             .font(.system(size: 12))
+                            .frame(maxWidth: .infinity, alignment: .leading)
                     }
                 }
                 Text("Shown side by side, e.g. 18W · CPU 23% · MEM 61%.")
