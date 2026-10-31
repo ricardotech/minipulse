@@ -22,9 +22,11 @@ deliberately has a small attack surface:
   can see all users' processes and scan all home directories; that
   is a privileged account. To run it with least privilege, change
   the service's log-on account to a regular user in `services.msc`
-  (it will then only see what that user can see). Installing the
-  service requires an Administrator shell; running the binary in
-  the foreground never does.
+  **and** grant that account Modify on `%ProgramData%\minipulse`
+  (e.g. `icacls %ProgramData%\minipulse /grant <user>:(OI)(CI)M`),
+  or it cannot write its database. Installing the service requires
+  an Administrator shell; running the binary in the foreground
+  never does.
 - It only *reads* system state. The single state-changing API call is
   `POST /api/disk/scan`, which starts a read-only directory walk over
   roots configured by the machine's owner.
@@ -52,10 +54,15 @@ names, and power history. **Treat dashboard access as sensitive.**
   `token` even on loopback.
 - The data directory is created owner-only (`0700`) and the generated
   config file `0600`, because both can contain sensitive things (your
-  token; your file paths). Don't relax those. (On Windows those
-  POSIX modes don't apply; the files live under your profile's ACL —
-  or under `%ProgramData%` for the service — so keep the token out
-  of any directory you share.)
+  token; your file paths). Don't relax those. On Windows POSIX modes
+  don't apply: foreground files live under your profile's ACL, and
+  `service install` puts a **protected SYSTEM+Administrators DACL**
+  on `%ProgramData%\minipulse\` and copies the binary to
+  `%ProgramFiles%\minipulse\` (a LocalSystem service must never run
+  a binary or config a standard user can replace — `%ProgramData%`
+  is world-readable and standard users can create directories
+  there, so a config found there with no installed service is
+  treated as foreign and rewritten).
 
 ## Hardening in the code
 

@@ -45,15 +45,14 @@ jobs:
           CGO_ENABLED: "1"
         run: |
           go build -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o minipulse.exe ./cmd/minipulse
+          .\minipulse.exe version
           Compress-Archive -Path minipulse.exe, README.md, LICENSE -DestinationPath minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip
           $h = (Get-FileHash -Algorithm SHA256 minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip).Hash.ToLower()
-          "$h  minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip" | Out-File -Encoding ascii minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip.sha256
+          # LF explicitly: a CRLF checksum file fails `shasum -c` on unix.
+          [IO.File]::WriteAllText("minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip.sha256", "$h  minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip`n")
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            minipulse-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz
-            minipulse-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz.sha256
-            minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip
-            minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip.sha256
+          files: minipulse-${{ github.ref_name }}-${{ matrix.asset }}.*
+          fail_on_unmatched_files: true
           generate_release_notes: true

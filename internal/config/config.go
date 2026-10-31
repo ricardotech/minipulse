@@ -185,13 +185,16 @@ func clampConfig(cfg *Config) {
 	}
 }
 
-// ExpandHome expands a leading "~/" (or bare "~") to the home directory.
+// ExpandHome expands a leading "~/" (or bare "~") to the home
+// directory. The Windows "~" spelling is accepted on every
+// platform (a config written on one OS shouldn't silently become
+// a CWD-relative path on the other).
 func ExpandHome(p string) string {
 	if p == "~" {
 		home, _ := os.UserHomeDir()
 		return home
 	}
-	if strings.HasPrefix(p, "~/") {
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[2:])
 	}

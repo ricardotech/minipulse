@@ -203,12 +203,14 @@ function drow(e, max) {
   return `<div class="drow">${name}<div class="bar"><i style="width:${pct}%"></i></div><span class="sz">${fmtBytes(e.size)}</span></div>`;
 }
 function crumbs(path) {
-  const parts = path.split("/").filter(Boolean);
+  // Paths arrive with the host OS separator (C:\Users\… on Windows).
+  const sep = path.includes("\\") ? "\\" : "/";
+  const parts = path.split(sep).filter(Boolean);
   let acc = "", out = `<a data-path="${esc(state.diskRoot)}">⌂ root</a>`;
-  const rootParts = state.diskRoot.split("/").filter(Boolean).length;
+  const rootParts = state.diskRoot.split(sep).filter(Boolean).length;
   parts.forEach((p, i) => {
-    acc += "/" + p;
-    if (i >= rootParts - 1) out += ` / <a data-path="${esc(acc)}">${esc(p)}</a>`;
+    acc = acc ? acc + sep + p : (sep === "\\" ? p : sep + p);
+    if (i >= rootParts - 1) out += ` ${sep} <a data-path="${esc(acc)}">${esc(p)}</a>`;
   });
   return out;
 }
