@@ -47,6 +47,15 @@ class TestSanitize(unittest.TestCase):
         self.assertIn("—W", text)          # no fake numeric watts
         self.assertNotIn("n|shell", text)  # top name sanitized
 
+    def test_wrong_container_types_do_not_raise(self):
+        # {"host": "x"} / {"top": "node"} used to AttributeError.
+        v = plugin.from_overview({"host": "x", "sample": "y"})
+        self.assertIsNone(v["host"])
+        v = plugin.from_mini({"top": "node"})
+        self.assertEqual(v["top"], [])
+        v = plugin.from_mini("not-a-dict")
+        self.assertFalse(v["power_available"])
+
     def test_redirects_refused_so_token_cannot_leak(self):
         handler = plugin._NoRedirect()
         self.assertIsNone(handler.redirect_request(None, None, 302, "", {}, "http://evil/"))

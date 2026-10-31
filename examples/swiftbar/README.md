@@ -7,9 +7,12 @@ menu bar, with zero native code. It prefers the cheap
 daemons. Redirects are never followed, so the API token can never
 be re-sent to a different origin.
 
-The menu bar shows e.g. `31W · 11%`. The dropdown adds SoC/CPU/GPU
-watts, temperatures, fan, memory, today's energy (kWh, cost, peak)
-and the top CPU processes. Click through to the full dashboard.
+The menu bar shows e.g. `31W · 11%`. The dropdown adds SoC watts,
+temperatures, fan, memory, energy and the top CPU processes.
+Against a current daemon (via `/api/mini`) energy is the cumulative
+Wh counter; the `/api/overview` fallback for older daemons also
+shows CPU/GPU watts and today's kWh/cost/peak. Click through to
+the full dashboard.
 
 ## Install
 

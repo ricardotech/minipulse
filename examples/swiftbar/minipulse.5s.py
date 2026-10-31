@@ -72,6 +72,12 @@ def num(v):
     return float(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
+def dget(d, key):
+    """Nested-dict access that tolerates wrong container types."""
+    v = d.get(key) if isinstance(d, dict) else None
+    return v if isinstance(v, dict) else {}
+
+
 def fmt_w(w):
     return f"{w:.0f}W" if w >= 10 else f"{w:.1f}W"
 
@@ -85,7 +91,9 @@ def error_state(msg):
 
 
 def from_mini(m):
-    p = m.get("top") or {}
+    if not isinstance(m, dict):
+        m = {}
+    p = dget(m, "top")
     top = [{"name": p.get("name"), "cpu_pct": num(p.get("cpu_pct"))}] if p.get("name") else []
     return {
         "sys_w": num(m.get("sys_w")), "soc_w": num(m.get("soc_w")),
@@ -97,9 +105,11 @@ def from_mini(m):
 
 
 def from_overview(d):
-    s = d.get("sample") or {}
-    p = s.get("power") or {}
-    e = d.get("energy_today") or {}
+    if not isinstance(d, dict):
+        d = {}
+    s = dget(d, "sample")
+    p = dget(s, "power")
+    e = dget(d, "energy_today")
     today = None
     if num(e.get("kwh")) is not None:
         today = {"kwh": num(e.get("kwh")), "cost": num(e.get("cost")) or 0,
@@ -112,7 +122,7 @@ def from_overview(d):
         "cpu_temp_c": num(p.get("cpu_temp_c")), "gpu_temp_c": num(p.get("gpu_temp_c")),
         "fan_rpm": num(p.get("fan_rpm")), "power_available": bool(p.get("available")),
         "power_reason": p.get("reason"), "wh_total": num(s.get("wh_total")),
-        "top": [], "today": today, "host": (d.get("host") or {}).get("hostname"),
+        "top": [], "today": today, "host": dget(d, "host").get("hostname"),
     }
 
 
