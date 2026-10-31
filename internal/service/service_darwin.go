@@ -122,3 +122,6 @@ func run(name string, args ...string) error {
 	}
 	return nil
 }
+
+// Describe names the installed unit for CLI output.
+func Describe() string { return PlistPath() }

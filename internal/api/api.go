@@ -563,7 +563,7 @@ func (s *Server) containers(w http.ResponseWriter, r *http.Request) {
 func (s *Server) services(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
 	defer cancel()
-	svcs, err := collect.LaunchdServices(ctx)
+	svcs, err := collect.SystemServices(ctx)
 	if err != nil {
 		serverErr(w, err)
 		return

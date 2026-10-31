@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"log/slog"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 
@@ -86,8 +87,13 @@ func NewPowerSource(ctx context.Context) *PowerSource {
 	ps := &PowerSource{}
 	path, err := exec.LookPath("macmon")
 	if err != nil {
-		ps.latest = model.Power{Available: false,
-			Reason: "macmon not installed — run: brew install macmon"}
+		reason := "macmon not installed — run: brew install macmon"
+		if runtime.GOOS != "darwin" {
+			// No sudoless package-power source exists off macOS
+			// (Windows needs a kernel driver + admin for MSR/RAPL).
+			reason = "power metrics need macOS + macmon — no sudoless source on this platform"
+		}
+		ps.latest = model.Power{Available: false, Reason: reason}
 		slog.Warn("power metrics unavailable", "reason", ps.latest.Reason)
 		return ps
 	}

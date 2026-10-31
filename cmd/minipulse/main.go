@@ -167,8 +167,8 @@ func cmdService(args []string) error {
 		if err := service.Install(self, config.DefaultPath()); err != nil {
 			return err
 		}
-		fmt.Println("installed:", service.PlistPath())
-		fmt.Println("MiniPulse will start at login and restart on crash.")
+		fmt.Println("installed:", service.Describe())
+		fmt.Println("MiniPulse will start automatically and restart on crash.")
 		return nil
 	case "uninstall":
 		if err := service.Uninstall(); err != nil {

@@ -63,20 +63,16 @@ type Config struct {
 	AlertCooldownMinutes int     `json:"alert_cooldown_minutes"`
 }
 
-// Dir is the per-user config directory.
-func Dir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "minipulse")
-}
+// Dir is the per-user config directory (platform-specific: see
+// paths_*.go).
+func Dir() string { return platformConfigDir() }
 
 // DefaultPath is where Load looks when no --config flag is given.
 func DefaultPath() string { return filepath.Join(Dir(), "config.json") }
 
-// DefaultDataDir is where the SQLite database lives by default.
-func DefaultDataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "minipulse")
-}
+// DefaultDataDir is where the SQLite database lives by default
+// (platform-specific: see paths_*.go).
+func DefaultDataDir() string { return platformDataDir() }
 
 // Defaults returns a fully-populated default configuration.
 func Defaults() *Config {
