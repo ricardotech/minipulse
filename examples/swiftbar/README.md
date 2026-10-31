@@ -41,6 +41,7 @@ menu-bar item → plugin environment variables):
 |---|---|---|
 | `MINIPULSE_URL` | `http://127.0.0.1:8848` | Daemon base URL. For a remote Mac use your Tailscale Serve `*.ts.net` URL (see the main README). |
 | `MINIPULSE_TOKEN` | _(empty)_ | API token, only if your daemon has one (`minipulse token`). Sent as the `X-MiniPulse-Token` header. Never commit it. |
+| `MINIPULSE_FIELDS` | `watts,cpu,mem` | Which indicators ride the menu bar, side by side: any subset of `watts,cpu,mem,temp,fan` (e.g. `cpu,mem` → `CPU 23% · MEM 61%`). |
 
 ## Behaviour notes
 

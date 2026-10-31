@@ -56,6 +56,22 @@ class TestSanitize(unittest.TestCase):
         v = plugin.from_mini("not-a-dict")
         self.assertFalse(v["power_available"])
 
+    def test_fields_customizable_canonical_order(self):
+        self.assertEqual(plugin.parse_fields("mem,cpu"), ["cpu", "mem"])
+        self.assertEqual(plugin.parse_fields("bogus,, watts "), ["watts"])
+        self.assertEqual(plugin.parse_fields(""), ["watts", "cpu", "mem"])
+        v = plugin.from_mini({"sys_w": 18.4, "soc_w": 9, "cpu_pct": 23, "mem_pct": 61,
+                              "cpu_temp_c": 64, "gpu_temp_c": 58, "fan_rpm": 1200,
+                              "power_available": True, "wh_total": 10})
+        old = plugin.FIELDS
+        try:
+            plugin.FIELDS = ["watts", "cpu", "mem"]
+            self.assertEqual(plugin.header_text(v), "18W · CPU 23% · MEM 61%")
+            plugin.FIELDS = ["cpu", "mem"]
+            self.assertEqual(plugin.header_text(v), "CPU 23% · MEM 61%")
+        finally:
+            plugin.FIELDS = old
+
     def test_redirects_refused_so_token_cannot_leak(self):
         handler = plugin._NoRedirect()
         self.assertIsNone(handler.redirect_request(None, None, 302, "", {}, "http://evil/"))

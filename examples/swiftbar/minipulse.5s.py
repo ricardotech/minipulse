@@ -20,6 +20,9 @@
 #   MINIPULSE_TOKEN  API token, only if the daemon has one configured.
 #                    Set it per-plugin in SwiftBar (right-click the
 #                    item > set environment variables) -- never commit it.
+#   MINIPULSE_FIELDS comma-separated menu-bar indicators, any subset
+#                    of watts,cpu,mem,temp,fan shown side by side.
+#                    Default: watts,cpu,mem.
 import json
 import os
 import sys
@@ -80,6 +83,35 @@ def dget(d, key):
 
 def fmt_w(w):
     return f"{w:.0f}W" if w >= 10 else f"{w:.1f}W"
+
+
+FIELD_ORDER = ["watts", "cpu", "mem", "temp", "fan"]
+
+
+def parse_fields(raw):
+    """Enabled header indicators, canonical order, junk dropped."""
+    wanted = {f.strip().lower() for f in (raw or "").split(",") if f.strip()}
+    chosen = [f for f in FIELD_ORDER if f in wanted]
+    return chosen or ["watts", "cpu", "mem"]
+
+
+FIELDS = parse_fields(os.environ.get("MINIPULSE_FIELDS", "watts,cpu,mem"))
+
+
+def header_text(v):
+    parts = []
+    for f in FIELDS:
+        if f == "watts":
+            parts.append(fmt_w(v["sys_w"]) if v["power_available"] and v["sys_w"] is not None else "—W")
+        elif f == "cpu" and v["cpu_pct"] is not None:
+            parts.append(f"CPU {v['cpu_pct']:.0f}%")
+        elif f == "mem" and v["mem_pct"] is not None:
+            parts.append(f"MEM {v['mem_pct']:.0f}%")
+        elif f == "temp":
+            parts.append(f"{v['cpu_temp_c']:.0f}°" if v["power_available"] and v["cpu_temp_c"] is not None else "—°")
+        elif f == "fan" and v["fan_rpm"]:
+            parts.append(f"{v['fan_rpm']:.0f} rpm")
+    return " · ".join(parts) or "MiniPulse"
 
 
 def error_state(msg):
@@ -151,10 +183,7 @@ def load():
 
 
 def render(v):
-    header = [fmt_w(v["sys_w"]) if v["power_available"] and v["sys_w"] is not None else "—W"]
-    if v["cpu_pct"] is not None:
-        header.append(f"{v['cpu_pct']:.0f}%")
-    print(" · ".join(header) + " | font=Menlo size=12")
+    print(header_text(v) + " | font=Menlo size=12")
     print("---")
     if v.get("host"):
         print(f"{clean(v['host'])} | size=13")
