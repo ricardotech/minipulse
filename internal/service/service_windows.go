@@ -13,7 +13,9 @@ import (
 	"strings"
 	"syscall"
 	"time"
+	"unsafe"
 
+	"github.com/Microsoft/go-winio"
 	"golang.org/x/sys/windows"
 	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
@@ -55,7 +57,13 @@ func programFilesBinary() string {
 // there, so without a protected DACL the service config (API
 // token), database and logs would be readable by every local user,
 // and a pre-planted config would be honored by a LocalSystem
-// service. POSIX 0o600/0o700 modes are no-ops on NTFS.
+// service. The owner matters as much as the DACL: an owner keeps
+// WRITE_DAC implicitly whatever the DACL says, so ownership is
+// forced to SYSTEM too (SeTakeOwnershipPrivilege). POSIX
+// 0o600/0o700 modes are no-ops on NTFS. Taking ownership of a
+// directory area an admin is actively installing a service under
+// is proportionate; failing to do so fails the install closed
+// rather than installing into an attacker-controlled tree.
 func restrictProgramData() error {
 	dir := programDataDir()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
@@ -69,12 +77,38 @@ func restrictProgramData() error {
 	if err != nil {
 		return fmt.Errorf("read security descriptor: %w", err)
 	}
-	if err := windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
-		windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
-		nil, nil, dacl, nil); err != nil {
+	owner, _, err := sd.Owner()
+	if err != nil {
+		return fmt.Errorf("read security descriptor owner: %w", err)
+	}
+	apply := func() error {
+		return windows.SetNamedSecurityInfo(dir, windows.SE_FILE_OBJECT,
+			windows.OWNER_SECURITY_INFORMATION|
+				windows.DACL_SECURITY_INFORMATION|windows.PROTECTED_DACL_SECURITY_INFORMATION,
+			owner, nil, dacl, nil)
+	}
+	if err := winio.RunWithPrivilege("SeTakeOwnershipPrivilege", func() error { return apply() }); err != nil {
 		return fmt.Errorf("restrict ACL on %s: %w", dir, err)
 	}
 	return nil
+}
+
+// programDataOwnedByUs reports whether the existing
+// %ProgramData%\minipulse directory belongs to SYSTEM or
+// Administrators — the verifiable provenance of a previous
+// install of ours (a pre-planted or foreign directory is owned
+// by whoever created it).
+func programDataOwnedByUs() bool {
+	sd, err := windows.GetNamedSecurityInfo(programDataDir(), windows.SE_FILE_OBJECT,
+		windows.OWNER_SECURITY_INFORMATION)
+	if err != nil {
+		return false
+	}
+	owner, _, err := sd.Owner()
+	if err != nil || owner == nil {
+		return false
+	}
+	return owner.String() == "S-1-5-18" || owner.String() == "S-1-5-32-544"
 }
 
 // Install registers MiniPulse as an automatic Windows Service
@@ -89,30 +123,39 @@ func Install(binary, configPath string) error {
 	}
 	defer m.Disconnect()
 
-	reinstall := false
-	if old, err := m.OpenService(ServiceName); err == nil {
-		reinstall = true
+	var old *mgr.Service
+	if o, err := m.OpenService(ServiceName); err == nil {
+		old = o
+		defer old.Close()
+	}
+	// Prepare everything fallible while the old service is still
+	// intact, so a bad config or a locked binary cannot leave the
+	// machine with no service at all. An existing service config is
+	// only kept on a reinstall over a live service record: with no
+	// service installed, a config found in %ProgramData% is foreign
+	// (standard users can create directories there, and a directory
+	// left behind by an uninstall is already SYSTEM-owned, so
+	// ownership alone proves nothing).
+	cfgPath, err := prepareServiceConfig(configPath, old != nil)
+	if err != nil {
+		return err
+	}
+	staged, exe, err := stageBinary(binary)
+	if err != nil {
+		return err
+	}
+	if old != nil {
 		if err := stopAndWait(old); err != nil {
-			old.Close()
 			return fmt.Errorf("stop existing service: %w", err)
 		}
 		if err := old.Delete(); err != nil {
-			old.Close()
 			return fmt.Errorf("delete existing service: %w", err)
 		}
-		old.Close()
 	}
-	// Config prep happens only after elevation is proven, and a
-	// config found in %ProgramData% with no installed service is
-	// foreign (possibly pre-planted by a standard user, who can
-	// create directories there) — only a reinstall may keep it.
-	cfgPath, err := prepareServiceConfig(configPath, reinstall)
-	if err != nil {
-		return err
-	}
-	exe, err := installBinary(binary)
-	if err != nil {
-		return err
+	if staged {
+		if err := moveStagedBinary(exe); err != nil {
+			return err
+		}
 	}
 	s, err := m.CreateService(ServiceName, exe, mgr.Config{
 		DisplayName: "MiniPulse",
@@ -129,6 +172,7 @@ func Install(binary, configPath string) error {
 		{Type: mgr.ServiceRestart, Delay: 5 * time.Second},
 		{Type: mgr.ServiceRestart, Delay: 30 * time.Second},
 	}, uint32((24 * time.Hour).Seconds())); err != nil {
+		_ = s.Delete() // roll back: no half-registered service
 		return fmt.Errorf("set recovery actions: %w", err)
 	}
 	if err := s.Start(); err != nil {
@@ -138,45 +182,57 @@ func Install(binary, configPath string) error {
 	return nil
 }
 
-// installBinary copies the running executable into
-// %ProgramFiles%\minipulse (writable by Administrators only) and
-// returns the path the SCM should register.
-func installBinary(binary string) (string, error) {
+// stageBinary copies the running executable next to its final
+// %ProgramFiles%\minipulse location as minipulse.exe.new (staged
+// reports whether finalizeBinary still has to move it into place,
+// which must wait until the old service is stopped).
+func stageBinary(binary string) (staged bool, finalPath string, err error) {
 	dst := programFilesBinary()
-	if filepath.Clean(binary) == filepath.Clean(dst) {
-		return dst, nil
+	srcInfo, err := os.Stat(binary)
+	if err != nil {
+		return false, "", err
+	}
+	if dstInfo, err := os.Stat(dst); err == nil && os.SameFile(srcInfo, dstInfo) {
+		return false, dst, nil // reinstalling from the installed binary itself
 	}
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-		return "", err
+		return false, "", err
 	}
 	src, err := os.Open(binary)
 	if err != nil {
-		return "", err
+		return false, "", err
 	}
 	defer src.Close()
-	var out *os.File
-	for attempt := 0; attempt < 10; attempt++ {
-		// A just-stopped previous service may hold the file briefly.
-		out, err = os.Create(dst)
-		if err == nil {
-			break
-		}
-		time.Sleep(300 * time.Millisecond)
-	}
+	tmp := dst + ".new"
+	out, err := os.Create(tmp)
 	if err != nil {
-		return "", fmt.Errorf("install binary to %s: %w", dst, err)
+		return false, "", err
 	}
 	defer out.Close()
 	if _, err := io.Copy(out, src); err != nil {
-		return "", err
+		return false, "", err
 	}
-	return dst, nil
+	return true, dst, nil
+}
+
+func moveStagedBinary(dst string) error {
+	var err error
+	for attempt := 0; attempt < 20; attempt++ {
+		// A just-stopped previous service may hold the file briefly.
+		if err = windows.MoveFileEx(windows.StringToUTF16Ptr(dst+".new"),
+			windows.StringToUTF16Ptr(dst), windows.MOVEFILE_REPLACE_EXISTING); err == nil {
+			return nil
+		}
+		time.Sleep(300 * time.Millisecond)
+	}
+	return fmt.Errorf("install binary to %s: %w", dst, err)
 }
 
 // prepareServiceConfig creates %ProgramData%\minipulse\config.json
 // (copying the user's config when present) behind a restricted
-// DACL and returns its path. keepExisting may only be true on a
-// reinstall, when the file's provenance is our own previous install.
+// DACL and returns its path. keepExisting may only be true when
+// the directory verifiably came from a previous install (see
+// programDataOwnedByUs).
 func prepareServiceConfig(userConfigPath string, keepExisting bool) (string, error) {
 	if err := restrictProgramData(); err != nil {
 		return "", err
@@ -184,11 +240,28 @@ func prepareServiceConfig(userConfigPath string, keepExisting bool) (string, err
 	dst := serviceConfigPath()
 	if keepExisting {
 		if _, err := os.Stat(dst); err == nil {
+			if err := normalizeServiceConfig(dst, false); err != nil {
+				return "", err
+			}
 			return dst, nil
 		}
 	}
+	// Keep a backup of whatever is being replaced (a config left
+	// behind by an uninstall is foreign for trust purposes, but
+	// its token/settings may still be wanted back), then unlink:
+	// truncating a pre-planted file would preserve its DACL (and
+	// its owner's read/write access).
+	if prev, err := os.ReadFile(dst); err == nil {
+		_ = os.WriteFile(dst+".bak", prev, 0o600)
+	}
+	_ = os.Remove(dst)
 	generated := false
 	if data, err := os.ReadFile(userConfigPath); err == nil {
+		// Validate before anything downstream trusts this copy.
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			return "", fmt.Errorf("parse %s: %w", userConfigPath, err)
+		}
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			return "", err
 		}
@@ -198,26 +271,35 @@ func prepareServiceConfig(userConfigPath string, keepExisting bool) (string, err
 		}
 		generated = true
 	}
-	raw, err := os.ReadFile(dst)
-	if err != nil {
+	if err := normalizeServiceConfig(dst, generated); err != nil {
 		return "", err
+	}
+	return dst, nil
+}
+
+// normalizeServiceConfig pins service-mode paths in the config at
+// path: data_dir next to the service config (unless the user named
+// a real absolute one that is not simply their per-user default,
+// which under LocalSystem would bury the database in the
+// installer's profile), and — for generated configs — the disk
+// roots at every user's home (the example names the installer's).
+func normalizeServiceConfig(path string, generated bool) error {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return err
 	}
 	var m map[string]any
 	if err := json.Unmarshal(raw, &m); err != nil {
-		return "", fmt.Errorf("parse %s: %w", dst, err)
+		return fmt.Errorf("parse %s: %w", path, err)
 	}
 	changed := false
-	// Pin data_dir next to the service config unless the *user's*
-	// config names a real one. Empty and ~-relative values would
-	// resolve into the LocalSystem profile (or the System32 CWD),
-	// and a generated example carries the installing user's
-	// per-user default.
-	if dd, _ := m["data_dir"].(string); generated || strings.TrimSpace(dd) == "" || strings.HasPrefix(dd, "~") {
+	dd, _ := m["data_dir"].(string)
+	expanded := config.ExpandHome(strings.TrimSpace(dd))
+	if generated || dd == "" || expanded != strings.TrimSpace(dd) ||
+		!filepath.IsAbs(expanded) || samePath(expanded, config.DefaultDataDir()) {
 		m["data_dir"] = filepath.Join(programDataDir(), "data")
 		changed = true
 	}
-	// A generated example scans the installer's home; the service
-	// equivalently wants every user's home (it runs as SYSTEM).
 	if generated {
 		drive := os.Getenv("SystemDrive")
 		if drive == "" {
@@ -226,16 +308,18 @@ func prepareServiceConfig(userConfigPath string, keepExisting bool) (string, err
 		m["disk_scan_roots"] = []string{filepath.Join(drive+`\`, "Users")}
 		changed = true
 	}
-	if changed {
-		out, err := json.MarshalIndent(m, "", "  ")
-		if err != nil {
-			return "", err
-		}
-		if err := os.WriteFile(dst, append(out, '\n'), 0o600); err != nil {
-			return "", err
-		}
+	if !changed {
+		return nil
 	}
-	return dst, nil
+	out, err := json.MarshalIndent(m, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(path, append(out, '\n'), 0o600)
+}
+
+func samePath(a, b string) bool {
+	return strings.EqualFold(filepath.Clean(a), filepath.Clean(b))
 }
 
 // Uninstall stops and removes the service. Config/data in
@@ -264,7 +348,13 @@ func Uninstall() error {
 }
 
 func stopAndWait(s *mgr.Service) error {
+	if st, err := s.Query(); err == nil && st.State == svc.Stopped {
+		return nil
+	}
 	if _, err := s.Control(svc.Stop); err != nil {
+		if errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+			return nil
+		}
 		return err
 	}
 	deadline := time.Now().Add(15 * time.Second)
@@ -278,34 +368,43 @@ func stopAndWait(s *mgr.Service) error {
 	return fmt.Errorf("service did not stop in time")
 }
 
-// Status prints the SCM view of the service ("" when not installed,
-// mirroring the darwin contract).
+// Status prints the SCM view of the service ("" when not
+// installed, mirroring the darwin contract). Uses connect +
+// query-status rights only, so it works from a non-elevated
+// shell — the mgr package would ask for SC_MANAGER_ALL_ACCESS.
 func Status() (string, error) {
-	m, err := mgr.ConnectRemote("")
+	h, err := windows.OpenSCManager(nil, nil, windows.SC_MANAGER_CONNECT)
 	if err != nil {
 		return "", fmt.Errorf("connect service manager: %w", err)
 	}
-	defer m.Disconnect()
-	s, err := m.OpenService(ServiceName)
+	defer windows.CloseServiceHandle(h)
+	namePtr, err := windows.UTF16PtrFromString(ServiceName)
+	if err != nil {
+		return "", err
+	}
+	s, err := windows.OpenService(h, namePtr, windows.SERVICE_QUERY_STATUS)
 	if err != nil {
 		if errors.Is(err, windows.ERROR_SERVICE_DOES_NOT_EXIST) {
 			return "", nil // not installed (darwin contract)
 		}
 		return "", fmt.Errorf("open service: %w", err)
 	}
-	defer s.Close()
-	st, err := s.Query()
-	if err != nil {
+	defer windows.CloseServiceHandle(s)
+	var needed uint32
+	buf := make([]byte, 1024)
+	if err := windows.QueryServiceStatusEx(s, windows.SC_STATUS_PROCESS_INFO,
+		&buf[0], uint32(len(buf)), &needed); err != nil {
 		return "", fmt.Errorf("query service: %w", err)
 	}
-	state := map[svc.State]string{
-		svc.Stopped: "stopped", svc.StartPending: "start pending",
-		svc.StopPending: "stop pending", svc.Running: "running",
-		svc.ContinuePending: "continue pending", svc.PausePending: "pause pending",
-		svc.Paused: "paused",
-	}[st.State]
+	st := (*windows.SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0]))
+	state := map[uint32]string{
+		windows.SERVICE_STOPPED: "stopped", windows.SERVICE_START_PENDING: "start pending",
+		windows.SERVICE_STOP_PENDING: "stop pending", windows.SERVICE_RUNNING: "running",
+		windows.SERVICE_CONTINUE_PENDING: "continue pending", windows.SERVICE_PAUSE_PENDING: "pause pending",
+		windows.SERVICE_PAUSED: "paused",
+	}[st.CurrentState]
 	if state == "" {
-		state = fmt.Sprintf("state-%d", st.State)
+		state = fmt.Sprintf("state-%d", st.CurrentState)
 	}
 	return fmt.Sprintf("%s: %s (pid %d)\nconfig: %s\n", ServiceName, state, st.ProcessId, serviceConfigPath()), nil
 }
@@ -340,7 +439,8 @@ func openServiceLog() (*os.File, error) {
 	}
 	path := filepath.Join(dir, "minipulse.log")
 	if info, err := os.Stat(path); err == nil && info.Size() > 5<<20 {
-		_ = os.Rename(path, path+".old") // one generation is enough
+		_ = os.Remove(path + ".old") // os.Rename does not replace on Windows
+		_ = os.Rename(path, path+".old")
 	}
 	return os.OpenFile(path, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0o644)
 }

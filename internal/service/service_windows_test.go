@@ -59,6 +59,12 @@ func TestPrepareServiceConfigForeignVsReinstall(t *testing.T) {
 	if m := readConfig(t, dst); m["token"] == "attacker-token-123456" {
 		t.Fatal("pre-planted config was honored on a fresh install")
 	}
+	// The directory must end up SYSTEM-owned, or the pre-planter
+	// keeps WRITE_DAC and can reopen it (requires an elevated
+	// test process — CI runners and admin shells qualify).
+	if !programDataOwnedByUs() {
+		t.Error("ProgramData dir is not SYSTEM/Administrators-owned after prepare")
+	}
 	// Now it is our own config: a reinstall must keep it.
 	if err := os.WriteFile(dst, []byte(`{"token":"ours-12345678901234"}`), 0o600); err != nil {
 		t.Fatal(err)

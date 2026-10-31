@@ -31,26 +31,46 @@ func SystemServices(ctx context.Context) ([]model.Service, error) {
 	}
 	defer windows.CloseServiceHandle(h)
 
-	var needed, returned, resume uint32
-	err = windows.EnumServicesStatusEx(h, windows.SC_ENUM_PROCESS_INFO,
-		windows.SERVICE_WIN32, windows.SERVICE_ACTIVE,
-		nil, 0, &needed, &returned, &resume, nil)
-	if err != nil && !errors.Is(err, windows.ERROR_MORE_DATA) {
-		return nil, fmt.Errorf("enumerate services: %w", err)
+	var entries []windows.ENUM_SERVICE_STATUS_PROCESS
+	// A service starting between the sizing call and the real one
+	// makes the buffer too small; retry with the freshly
+	// reported size instead of failing the whole request.
+	for attempt := 0; attempt < 3; attempt++ {
+		var needed, returned, resume uint32
+		err = windows.EnumServicesStatusEx(h, windows.SC_ENUM_PROCESS_INFO,
+			windows.SERVICE_WIN32, windows.SERVICE_ACTIVE,
+			nil, 0, &needed, &returned, &resume, nil)
+		if err != nil && !errors.Is(err, windows.ERROR_MORE_DATA) {
+			return nil, fmt.Errorf("enumerate services: %w", err)
+		}
+		if needed == 0 {
+			return nil, nil
+		}
+		buf := make([]byte, needed)
+		returned = 0
+		err = windows.EnumServicesStatusEx(h, windows.SC_ENUM_PROCESS_INFO,
+			windows.SERVICE_WIN32, windows.SERVICE_ACTIVE,
+			&buf[0], uint32(len(buf)), &needed, &returned, &resume, nil)
+		if errors.Is(err, windows.ERROR_MORE_DATA) {
+			continue
+		}
+		if err != nil {
+			return nil, fmt.Errorf("enumerate services: %w", err)
+		}
+		entries = unsafe.Slice((*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0])), returned)
+		break
 	}
-	if needed == 0 {
-		return nil, nil
+	if entries == nil {
+		return nil, fmt.Errorf("enumerate services: buffer kept growing")
 	}
-	buf := make([]byte, needed)
-	returned, resume = 0, 0
-	if err := windows.EnumServicesStatusEx(h, windows.SC_ENUM_PROCESS_INFO,
-		windows.SERVICE_WIN32, windows.SERVICE_ACTIVE,
-		&buf[0], uint32(len(buf)), &needed, &returned, &resume, nil); err != nil {
-		return nil, fmt.Errorf("enumerate services: %w", err)
-	}
-	entries := unsafe.Slice((*windows.ENUM_SERVICE_STATUS_PROCESS)(unsafe.Pointer(&buf[0])), returned)
-	out := make([]model.Service, 0, returned)
+	out := make([]model.Service, 0, len(entries))
 	for _, e := range entries {
+		// SERVICE_ACTIVE also covers start-pending/paused; the
+		// view promises *running* (the rest would show as
+		// "stopped" with pid 0 in the UI).
+		if e.ServiceStatusProcess.CurrentState != windows.SERVICE_RUNNING {
+			continue
+		}
 		out = append(out, model.Service{
 			Label: windows.UTF16PtrToString(e.ServiceName),
 			PID:   int(e.ServiceStatusProcess.ProcessId),

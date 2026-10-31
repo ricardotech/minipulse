@@ -203,13 +203,18 @@ function drow(e, max) {
   return `<div class="drow">${name}<div class="bar"><i style="width:${pct}%"></i></div><span class="sz">${fmtBytes(e.size)}</span></div>`;
 }
 function crumbs(path) {
-  // Paths arrive with the host OS separator (C:\Users\… on Windows).
+  // Paths arrive with the host OS separator (C:\Users\… or a UNC
+  // \\server\share on Windows). The first segment needs the
+  // trailing separator ("C:" alone is the drive's CWD, not its
+  // root), and a UNC path keeps its leading double separator.
   const sep = path.includes("\\") ? "\\" : "/";
+  const unc = sep === "\\" && path.startsWith("\\\\");
   const parts = path.split(sep).filter(Boolean);
   let acc = "", out = `<a data-path="${esc(state.diskRoot)}">⌂ root</a>`;
   const rootParts = state.diskRoot.split(sep).filter(Boolean).length;
   parts.forEach((p, i) => {
-    acc = acc ? acc + sep + p : (sep === "\\" ? p : sep + p);
+    if (acc === "") acc = sep === "/" ? sep + p : (unc ? "\\\\" + p : p + sep);
+    else acc = acc.endsWith(sep) ? acc + p : acc + sep + p;
     if (i >= rootParts - 1) out += ` ${sep} <a data-path="${esc(acc)}">${esc(p)}</a>`;
   });
   return out;
