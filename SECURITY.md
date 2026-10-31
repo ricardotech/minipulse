@@ -17,7 +17,14 @@ MiniPulse is a **read-only monitoring agent** for a Mac you own. It
 deliberately has a small attack surface:
 
 - It never runs as root and never asks for `sudo` (wattage comes from
-  `macmon`, which uses an unprivileged API).
+  `macmon`, which uses an unprivileged API). **Windows exception:**
+  the optional Windows Service runs as LocalSystem by default so it
+  can see all users' processes and scan all home directories; that
+  is a privileged account. To run it with least privilege, change
+  the service's log-on account to a regular user in `services.msc`
+  (it will then only see what that user can see). Installing the
+  service requires an Administrator shell; running the binary in
+  the foreground never does.
 - It only *reads* system state. The single state-changing API call is
   `POST /api/disk/scan`, which starts a read-only directory walk over
   roots configured by the machine's owner.
@@ -45,7 +52,10 @@ names, and power history. **Treat dashboard access as sensitive.**
   `token` even on loopback.
 - The data directory is created owner-only (`0700`) and the generated
   config file `0600`, because both can contain sensitive things (your
-  token; your file paths). Don't relax those.
+  token; your file paths). Don't relax those. (On Windows those
+  POSIX modes don't apply; the files live under your profile's ACL —
+  or under `%ProgramData%` for the service — so keep the token out
+  of any directory you share.)
 
 ## Hardening in the code
 
