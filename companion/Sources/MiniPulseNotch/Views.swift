@@ -153,11 +153,20 @@ struct NotchView: View {
 
 struct PrefsView: View {
     @ObservedObject var store: Store
+    // Local draft: binding the field straight to store.host would
+    // persist every keystroke (didSet → UserDefaults) BEFORE
+    // validation — including a pasted credential-bearing URL.
+    @State private var hostText: String
     @State private var token: String = TokenStore.load()
     @State private var problem: String?
 
+    init(store: Store) {
+        self.store = store
+        _hostText = State(initialValue: store.host)
+    }
+
     private var hostWarning: String? {
-        switch HostValidation.validate(store.host) {
+        switch HostValidation.validate(hostText) {
         case .invalid(let why): return "Invalid URL: \(why)."
         case .ok(warnInsecure: true):
             return "Plain http outside loopback: the token travels in clear on the LAN. Prefer a Tailscale Serve (*.ts.net) URL."
@@ -167,7 +176,7 @@ struct PrefsView: View {
 
     var body: some View {
         Form {
-            TextField("Daemon URL", text: $store.host)
+            TextField("Daemon URL", text: $hostText)
                 .textFieldStyle(.roundedBorder)
             if let hostWarning {
                 Text(hostWarning).font(.system(size: 11)).foregroundStyle(.orange)
@@ -183,11 +192,12 @@ struct PrefsView: View {
             HStack {
                 Spacer()
                 Button("Save & reconnect") {
-                    if case .invalid(let why) = HostValidation.validate(store.host) {
+                    if case .invalid(let why) = HostValidation.validate(hostText) {
                         problem = "Fix the URL first: \(why)."
                         return
                     }
                     if TokenStore.save(token) {
+                        store.host = hostText.trimmingCharacters(in: .whitespacesAndNewlines)
                         problem = nil
                         store.restart()
                     } else {

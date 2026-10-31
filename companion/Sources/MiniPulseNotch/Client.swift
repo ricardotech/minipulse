@@ -40,7 +40,10 @@ enum TokenStore {
         let base: [String: Any] = [kSecClass as String: kSecClassGenericPassword,
                                    kSecAttrService as String: service,
                                    kSecAttrAccount as String: account]
-        SecItemDelete(base as CFDictionary)
+        let delStatus = SecItemDelete(base as CFDictionary)
+        guard delStatus == errSecSuccess || delStatus == errSecItemNotFound else {
+            return false // old item may survive and shadow the new one
+        }
         guard !token.isEmpty, let data = token.data(using: .utf8) else { return true }
         var attrs = base
         attrs[kSecValueData as String] = data
@@ -78,7 +81,10 @@ final class Store: ObservableObject {
     private var task: Task<Void, Never>?
     private var watcherTask: Task<Void, Never>?
     private var topTask: Task<Void, Never>?
-    private var lastSampleAt: Date?
+    private var lastSampleAt: Date?    // collection time (daemon clock, clamped)
+    private var lastArrivalAt: Date?   // local arrival time (this Mac's clock)
+    private var lastSessionSeconds: TimeInterval = 0
+    private var lastSessionSamples = 0
     private let redirectRefuser = RedirectRefuser()
     private lazy var session = URLSession(configuration: .ephemeral,
                                           delegate: redirectRefuser, delegateQueue: nil)
@@ -88,7 +94,11 @@ final class Store: ObservableObject {
         showNotchPanel = UserDefaults.standard.object(forKey: "showNotchPanel") as? Bool ?? true
     }
 
-    var baseURL: URL? { URL(string: host) }
+    var baseURL: URL? {
+        // Never hand an unvalidated free-text URL to Link/fetches.
+        if case .invalid = HostValidation.validate(host) { return nil }
+        return URL(string: host)
+    }
     var dashboardURL: URL? { baseURL }
 
     func start() {
@@ -103,7 +113,12 @@ final class Store: ObservableObject {
 
     func restart() {
         state = .connecting
-        topProcesses = [] // never show the previous host's processes
+        // Never keep showing the previous host's numbers.
+        sample = nil
+        lastSampleAt = nil
+        lastArrivalAt = nil
+        topTask?.cancel()
+        topProcesses = []
         start()
     }
 
@@ -133,9 +148,10 @@ final class Store: ObservableObject {
                     state = sample == nil ? .offline("daemon unreachable") : .stale
                 }
                 await resyncMini()
-                // A session that delivered fresh samples recently
-                // was healthy: next retry starts from 1s again.
-                if let at = lastSampleAt, Date().timeIntervalSince(at) < 15 {
+                // Reset only after a genuinely healthy session. A
+                // flapping server that sends one sample then drops
+                // must still earn growing backoff.
+                if lastSessionSeconds > 30 || lastSessionSamples >= 5 {
                     backoff = 1
                 }
                 try? await Task.sleep(nanoseconds: backoff * 1_000_000_000)
@@ -162,21 +178,32 @@ final class Store: ObservableObject {
             state = .offline(code == 401 ? "token missing/wrong" : "HTTP \(code)")
             throw URLError(.badServerResponse)
         }
+        let startedAt = Date()
+        var count = 0
+        defer {
+            lastSessionSeconds = Date().timeIntervalSince(startedAt)
+            lastSessionSamples = count
+        }
         for try await line in bytes.lines {
             if let s = SSEParser.sample(fromLine: line) {
+                count += 1
                 accept(s)
             }
         }
         throw URLError(.networkConnectionLost)
     }
 
-    /// Freshness is judged by the sample's own collection time
-    /// when the daemon sent one, never just by arrival.
+    /// Freshness uses both clocks: the collection time (clamped to
+    /// never be in our future — a remote daemon with a skewed clock
+    /// must not look live forever) for age-on-arrival, and the
+    /// local arrival time for "nothing new arrived lately".
     private func accept(_ s: MiniSample) {
         sample = s
-        let collectedAt = s.time ?? Date()
+        let now = Date()
+        let collectedAt = min(s.time ?? now, now)
         lastSampleAt = collectedAt
-        state = Date().timeIntervalSince(collectedAt) > 15 ? .stale : .live
+        lastArrivalAt = now
+        state = now.timeIntervalSince(collectedAt) > 15 ? .stale : .live
     }
 
     private func resyncMini() async {
@@ -190,7 +217,7 @@ final class Store: ObservableObject {
     private func staleWatcher() async {
         while !Task.isCancelled {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
-            if state == .live, let at = lastSampleAt, Date().timeIntervalSince(at) > 15 {
+            if state == .live, let at = lastArrivalAt, Date().timeIntervalSince(at) > 15 {
                 state = .stale
             }
         }
