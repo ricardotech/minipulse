@@ -54,5 +54,25 @@ final class CoreTests: XCTestCase {
         XCTAssertNil(NotchGeometry.simulated(from: "none"))
         XCTAssertNil(NotchGeometry.simulated(from: "banana"))
         XCTAssertNil(NotchGeometry.simulated(from: nil))
+        // Absurd specs clamp instead of building a giant window.
+        XCTAssertEqual(NotchGeometry.simulated(from: "99999x99999")?.notchWidth, 400)
+    }
+
+    func testDaemonTimeParsesGoNanoAndDrivesFreshness() throws {
+        let json = #"{"sys_w":1,"soc_w":1,"cpu_pct":1,"mem_pct":1,"cpu_temp_c":1,"gpu_temp_c":1,"fan_rpm":1,"power_available":true,"wh_total":1,"time":"2026-10-31T10:15:11.619407-03:00"}"#
+        let s = try MiniPulseJSON.decodeMini(Data(json.utf8))
+        XCTAssertNotNil(s.time)
+        XCTAssertEqual(s.time?.timeIntervalSince1970 ?? 0, 1793452511.619, accuracy: 0.01)
+        XCTAssertNil(MiniPulseJSON.parseDaemonTime("not-a-date"))
+        XCTAssertNil(MiniPulseJSON.parseDaemonTime(nil))
+    }
+
+    func testHostValidation() {
+        XCTAssertEqual(HostValidation.validate("http://127.0.0.1:8848"), .ok(warnInsecure: false))
+        XCTAssertEqual(HostValidation.validate("https://mini.tail-abc.ts.net"), .ok(warnInsecure: false))
+        XCTAssertEqual(HostValidation.validate("http://192.168.1.9:8848"), .ok(warnInsecure: true))
+        if case .ok = HostValidation.validate("127.0.0.1:8848") { XCTFail("missing scheme must be invalid") }
+        if case .ok = HostValidation.validate("http://h:8848/?token=SECRET") { XCTFail("query token must be invalid") }
+        if case .ok = HostValidation.validate("http://user:pw@h:8848") { XCTFail("userinfo must be invalid") }
     }
 }

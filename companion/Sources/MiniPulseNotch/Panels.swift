@@ -107,7 +107,7 @@ final class StatusItemController: NSObject {
         if popover.isShown {
             popover.performClose(nil)
         } else {
-            store.refreshTopProcesses()
+            // PopoverView.onAppear is the single refresh trigger.
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
         }
     }
@@ -135,6 +135,10 @@ final class NotchPanelController {
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
+        store.$notchExpanded
+            .receive(on: RunLoop.main)
+            .sink { [weak self] expanded in self?.resizeForExpanded(expanded) }
+            .store(in: &cancellables)
         rebuild()
     }
 
@@ -150,13 +154,24 @@ final class NotchPanelController {
             auxRightWidth: screen.auxiliaryTopRightArea.map { Double($0.width) })
     }
 
+    /// Prefer the screen that actually has a notch (focus moving
+    /// to an external display changes NSScreen.main without any
+    /// screen-parameters notification); fall back to main.
+    static func targetScreen() -> NSScreen? {
+        NSScreen.screens.first { geometry(for: $0).hasNotch } ?? NSScreen.main
+    }
+
+    private var collapsedHeight: Double = 32
+    private let expandedHeight: Double = 190
+
     private func rebuild() {
         panel?.orderOut(nil)
         panel = nil
-        guard store.showNotchPanel, let screen = NSScreen.main else { return }
+        guard store.showNotchPanel, let screen = Self.targetScreen() else { return }
         let geo = Self.geometry(for: screen)
+        collapsedHeight = geo.collapsedSize.height
         let width = geo.collapsedSize.width + 60
-        let height = 220.0 // window stays expanded-size; only the inner shape animates
+        let height = store.notchExpanded ? expandedHeight : collapsedHeight
         let frame = NSRect(x: screen.frame.midX - width / 2,
                            y: screen.frame.maxY - height,
                            width: width, height: height)
@@ -171,12 +186,21 @@ final class NotchPanelController {
         p.hasShadow = false
         p.isMovable = false
         p.hidesOnDeactivate = false
-        let host = NSHostingView(rootView: NotchView(store: store, geometry: geo))
-        host.frame = NSRect(x: 0, y: height - 210, width: width, height: 210)
-        host.autoresizingMask = [.width, .minYMargin]
-        p.contentView?.addSubview(host)
+        // The window is exactly the visible shape: collapsed it is
+        // one 32pt band (no transparent click-eating area below
+        // the pill), and it grows only while the flyout is open.
+        p.contentView = NSHostingView(rootView: NotchView(store: store, geometry: geo))
         p.orderFrontRegardless()
         panel = p
+    }
+
+    private func resizeForExpanded(_ expanded: Bool) {
+        guard let p = panel, let screen = p.screen ?? Self.targetScreen() else { return }
+        let height = expanded ? expandedHeight : collapsedHeight
+        var f = p.frame
+        f.origin.y = screen.frame.maxY - height
+        f.size.height = height
+        p.setFrame(f, display: true, animate: true)
     }
 }
 

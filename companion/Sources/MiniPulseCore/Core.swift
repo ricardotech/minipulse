@@ -61,8 +61,11 @@ public struct NotchGeometry: Equatable, Sendable {
     public static func simulated(from spec: String?) -> NotchGeometry? {
         guard let spec, !spec.isEmpty, spec != "none" else { return nil }
         let parts = spec.lowercased().split(separator: "x")
-        guard parts.count == 2, let w = Double(parts[0]), let h = Double(parts[1]),
+        guard parts.count == 2, var w = Double(parts[0]), var h = Double(parts[1]),
               w > 0, h > 0 else { return nil }
+        // Clamp to plausible notch territory: a typo'd default must
+        // not produce a screen-sized window.
+        w = min(max(w, 80), 400); h = min(max(h, 20), 60)
         var g = NotchGeometry(screenWidth: 0, safeAreaTop: 0, auxLeftWidth: nil, auxRightWidth: nil)
         g.hasNotch = true; g.notchWidth = w; g.notchHeight = h
         return g
@@ -74,5 +77,34 @@ public struct NotchGeometry: Equatable, Sendable {
     public var collapsedSize: (width: Double, height: Double) {
         if hasNotch { return (notchWidth + 150, max(notchHeight, 32)) }
         return (190, 32)
+    }
+}
+
+/// The daemon base URL is free text in Preferences and persisted in
+/// UserDefaults. Validate it before use: a missing scheme used to
+/// spin the reconnect loop; userinfo/query would persist a secret
+/// outside the Keychain. Plain http is fine on loopback and stays
+/// allowed elsewhere only as an explicit, warned-about choice
+/// (the token then travels in clear — prefer a *.ts.net URL).
+public enum HostValidation {
+    public enum Result: Equatable {
+        case ok(warnInsecure: Bool)
+        case invalid(String)
+    }
+
+    public static func validate(_ raw: String) -> Result {
+        let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let url = URL(string: s), let scheme = url.scheme?.lowercased(),
+              scheme == "http" || scheme == "https", url.host != nil else {
+            return .invalid("use a full URL, e.g. http://127.0.0.1:8848")
+        }
+        if url.user != nil || url.password != nil {
+            return .invalid("credentials belong in the token field (Keychain), not the URL")
+        }
+        if url.query != nil || url.fragment != nil {
+            return .invalid("no query/fragment in the base URL — the token field is separate")
+        }
+        let loopback = ["127.0.0.1", "localhost", "::1"].contains(url.host?.lowercased() ?? "")
+        return .ok(warnInsecure: scheme == "http" && !loopback)
     }
 }

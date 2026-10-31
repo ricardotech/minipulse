@@ -15,15 +15,20 @@ public struct MiniSample: Equatable, Sendable {
     public var whTotal: Double
     public var topName: String?
     public var topCPUPct: Double?
+    /// When the daemon COLLECTED this sample. Freshness must be
+    /// judged by this, not by arrival: a daemon whose collector is
+    /// wedged but whose HTTP server lives would otherwise serve
+    /// hours-old numbers as "live" forever.
+    public var time: Date?
 
     public init(sysW: Double, socW: Double, cpuPct: Double, memPct: Double,
                 cpuTempC: Double, gpuTempC: Double, fanRPM: Int,
                 powerAvailable: Bool, whTotal: Double,
-                topName: String? = nil, topCPUPct: Double? = nil) {
+                topName: String? = nil, topCPUPct: Double? = nil, time: Date? = nil) {
         self.sysW = sysW; self.socW = socW; self.cpuPct = cpuPct; self.memPct = memPct
         self.cpuTempC = cpuTempC; self.gpuTempC = gpuTempC; self.fanRPM = fanRPM
         self.powerAvailable = powerAvailable; self.whTotal = whTotal
-        self.topName = topName; self.topCPUPct = topCPUPct
+        self.topName = topName; self.topCPUPct = topCPUPct; self.time = time
     }
 
     /// Watts label for glanceable surfaces. When the daemon reports
@@ -37,16 +42,38 @@ public struct MiniSample: Equatable, Sendable {
 /// Decoders for the two daemon payloads, kept dependency-free so the
 /// core can be unit-tested without AppKit.
 public enum MiniPulseJSON {
+    /// Go encodes time.Time as RFC3339Nano (up to 9 fractional
+    /// digits). ISO8601DateFormatter is picky about fraction width,
+    /// so trim the fraction to milliseconds before parsing.
+    public static func parseDaemonTime(_ s: String?) -> Date? {
+        guard var s else { return nil }
+        if let dot = s.firstIndex(of: ".") {
+            let tail = s[s.index(after: dot)...]
+            let digits = tail.prefix { $0.isNumber }
+            if digits.count > 3 {
+                let rest = tail.dropFirst(digits.count)
+                s = String(s[...dot]) + digits.prefix(3) + rest
+            }
+        }
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        if let d = f.date(from: s) { return d }
+        f.formatOptions = [.withInternetDateTime]
+        return f.date(from: s)
+    }
+
     private struct MiniPayload: Decodable {
         var sys_w: Double; var soc_w: Double; var cpu_pct: Double; var mem_pct: Double
         var cpu_temp_c: Double; var gpu_temp_c: Double; var fan_rpm: Int
         var power_available: Bool; var wh_total: Double
+        var time: String?
         var top: Top?
         struct Top: Decodable { var name: String; var cpu_pct: Double }
     }
 
     private struct StreamPayload: Decodable {
         var cpu_pct: Double; var mem_pct: Double; var wh_total: Double
+        var time: String?
         var power: Power
         struct Power: Decodable {
             var available: Bool; var sys_w: Double; var soc_w: Double
@@ -59,7 +86,8 @@ public enum MiniPulseJSON {
         return MiniSample(sysW: p.sys_w, socW: p.soc_w, cpuPct: p.cpu_pct, memPct: p.mem_pct,
                           cpuTempC: p.cpu_temp_c, gpuTempC: p.gpu_temp_c, fanRPM: p.fan_rpm,
                           powerAvailable: p.power_available, whTotal: p.wh_total,
-                          topName: p.top?.name, topCPUPct: p.top?.cpu_pct)
+                          topName: p.top?.name, topCPUPct: p.top?.cpu_pct,
+                          time: parseDaemonTime(p.time))
     }
 
     public static func decodeStreamSample(_ data: Data) throws -> MiniSample {
@@ -67,6 +95,7 @@ public enum MiniPulseJSON {
         return MiniSample(sysW: p.power.sys_w, socW: p.power.soc_w, cpuPct: p.cpu_pct,
                           memPct: p.mem_pct, cpuTempC: p.power.cpu_temp_c,
                           gpuTempC: p.power.gpu_temp_c, fanRPM: p.power.fan_rpm,
-                          powerAvailable: p.power.available, whTotal: p.wh_total)
+                          powerAvailable: p.power.available, whTotal: p.wh_total,
+                          time: parseDaemonTime(p.time))
     }
 }

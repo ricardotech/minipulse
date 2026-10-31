@@ -96,6 +96,7 @@ struct PopoverView: View {
 struct NotchView: View {
     @ObservedObject var store: Store
     var geometry: NotchGeometry
+    @State private var hovering = false
 
     var body: some View {
         VStack(spacing: 0) {
@@ -126,16 +127,24 @@ struct NotchView: View {
         }
         .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: store.notchExpanded ? 18 : 16))
-        .onHover { hovering in
-            if hovering {
+        // Top-anchored: the collapsed 32pt band must hug the top
+        // edge of the window (and of the physical notch), never
+        // float in the vertical middle of a tall hosting view.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
+        .onHover { inside in
+            hovering = inside
+            if inside {
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     store.notchExpanded = true
                 }
             } else {
-                // Small debounce so a pass-through to the menu bar
-                // does not flicker the flyout.
+                // Debounced close that re-checks hover, so leaving
+                // and re-entering within 250ms cannot close the
+                // flyout under the cursor.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) {
-                    withAnimation(.easeOut(duration: 0.2)) { store.notchExpanded = false }
+                    if !hovering {
+                        withAnimation(.easeOut(duration: 0.2)) { store.notchExpanded = false }
+                    }
                 }
             }
         }
@@ -145,21 +154,45 @@ struct NotchView: View {
 struct PrefsView: View {
     @ObservedObject var store: Store
     @State private var token: String = TokenStore.load()
+    @State private var problem: String?
+
+    private var hostWarning: String? {
+        switch HostValidation.validate(store.host) {
+        case .invalid(let why): return "Invalid URL: \(why)."
+        case .ok(warnInsecure: true):
+            return "Plain http outside loopback: the token travels in clear on the LAN. Prefer a Tailscale Serve (*.ts.net) URL."
+        case .ok: return nil
+        }
+    }
 
     var body: some View {
         Form {
             TextField("Daemon URL", text: $store.host)
                 .textFieldStyle(.roundedBorder)
+            if let hostWarning {
+                Text(hostWarning).font(.system(size: 11)).foregroundStyle(.orange)
+            }
             SecureField("API token (Keychain)", text: $token)
                 .textFieldStyle(.roundedBorder)
+            if let problem {
+                Text(problem).font(.system(size: 11)).foregroundStyle(.red)
+            }
             Toggle("Show notch/pill panel", isOn: $store.showNotchPanel)
             Text("Local default is http://127.0.0.1:8848. For a remote Mac use its Tailscale Serve (*.ts.net) URL — the daemon refuses plain-LAN binds without a token by design.")
                 .font(.system(size: 11)).foregroundStyle(.secondary)
             HStack {
                 Spacer()
                 Button("Save & reconnect") {
-                    TokenStore.save(token)
-                    store.restart()
+                    if case .invalid(let why) = HostValidation.validate(store.host) {
+                        problem = "Fix the URL first: \(why)."
+                        return
+                    }
+                    if TokenStore.save(token) {
+                        problem = nil
+                        store.restart()
+                    } else {
+                        problem = "Keychain refused to store the token (ad-hoc rebuilds change the app identity — delete the MiniPulseNotch Keychain item and try again)."
+                    }
                 }
                 .keyboardShortcut(.defaultAction)
             }

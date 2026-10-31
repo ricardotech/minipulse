@@ -162,6 +162,13 @@ Everything the UI shows, as JSON, plus a live SSE stream:
 | `GET /api/containers` · `GET /api/services` · `GET /api/events` | Docker, launchd+ports+health, event log |
 | `GET /metrics` · `GET /healthz` | Prometheus text · liveness |
 
+## Menu bar & notch (optional companions)
+
+The daemon stays deliberately headless, but two small clients put its stats where your eyes already are:
+
+- [`examples/swiftbar/`](examples/swiftbar/README.md) — a SwiftBar/xbar plugin: live watts + CPU in the menu bar, no native code.
+- [`companion/`](companion/README.md) — **MiniPulseNotch**, a Swift agent app with a load-paced pulse runner in the menu bar and a stats panel in the MacBook notch (floating pill on notch-less Macs).
+
 ## How watts work without sudo
 
 `powermetrics` requires root — a non-starter for an always-on agent. [macmon](https://github.com/vladkens/macmon) reads the same underlying IOReport data through a private but unprivileged API. MiniPulse runs `macmon pipe` as a child process and parses its JSON stream; if macmon isn't installed, one line on the dashboard says so and everything else still works.
