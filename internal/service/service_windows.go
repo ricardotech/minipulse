@@ -86,6 +86,7 @@ func prepareServiceConfig(userConfigPath string) (string, error) {
 	if err := os.MkdirAll(programDataDir(), 0o755); err != nil {
 		return "", err
 	}
+	generated := false
 	if data, err := os.ReadFile(userConfigPath); err == nil {
 		if err := os.WriteFile(dst, data, 0o600); err != nil {
 			return "", err
@@ -94,10 +95,12 @@ func prepareServiceConfig(userConfigPath string) (string, error) {
 		if err := config.WriteExample(dst); err != nil {
 			return "", err
 		}
+		generated = true
 	}
-	// Pin data_dir next to the service config unless the config
-	// already names one (the per-user default would resolve into
-	// the LocalSystem profile, where nobody will ever find it).
+	// Pin data_dir next to the service config unless the *user's*
+	// config names one. A generated example carries the installing
+	// user's per-user default, which under LocalSystem would bury
+	// the database in someone else's profile.
 	raw, err := os.ReadFile(dst)
 	if err != nil {
 		return "", err
@@ -106,7 +109,7 @@ func prepareServiceConfig(userConfigPath string) (string, error) {
 	if err := json.Unmarshal(raw, &m); err != nil {
 		return "", fmt.Errorf("parse %s: %w", dst, err)
 	}
-	if _, ok := m["data_dir"]; !ok {
+	if _, ok := m["data_dir"]; !ok || generated {
 		m["data_dir"] = filepath.Join(programDataDir(), "data")
 		out, err := json.MarshalIndent(m, "", "  ")
 		if err != nil {
