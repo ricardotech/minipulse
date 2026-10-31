@@ -131,11 +131,16 @@ final class NotchPanelController {
             object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuild() }
         }
+        // dropFirst: @Published replays the current value on
+        // subscribe, which would rebuild/resize redundantly at
+        // launch (the explicit rebuild() below covers startup).
         store.$showNotchPanel
+            .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.rebuild() }
             .store(in: &cancellables)
         store.$notchExpanded
+            .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] expanded in self?.resizeForExpanded(expanded) }
             .store(in: &cancellables)
@@ -165,7 +170,10 @@ final class NotchPanelController {
     private let expandedHeight: Double = 190
 
     private func rebuild() {
-        panel?.orderOut(nil)
+        // close(), not orderOut: $showNotchPanel fires on subscribe,
+        // so init rebuilds twice; an ordered-out first panel stayed
+        // alive (retained via its hosting view) as a ghost window.
+        panel?.close()
         panel = nil
         guard store.showNotchPanel, let screen = Self.targetScreen() else { return }
         let geo = Self.geometry(for: screen)
@@ -189,7 +197,15 @@ final class NotchPanelController {
         // The window is exactly the visible shape: collapsed it is
         // one 32pt band (no transparent click-eating area below
         // the pill), and it grows only while the flyout is open.
-        p.contentView = NSHostingView(rootView: NotchView(store: store, geometry: geo))
+        // The hosting view goes in as a plain subview with an
+        // explicit frame: as contentView its intrinsic-size
+        // behaviour resized the WINDOW to the SwiftUI fitting size
+        // on every sample (observed drifting to 358x72, 54pt below
+        // the top edge).
+        let host = NSHostingView(rootView: NotchView(store: store, geometry: geo))
+        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
+        host.autoresizingMask = [.width, .height]
+        p.contentView?.addSubview(host)
         p.orderFrontRegardless()
         panel = p
     }
