@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -58,6 +59,11 @@ func TestLoadClampsDestructiveZeros(t *testing.T) {
 }
 
 func TestWriteExampleIsOwnerOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		// POSIX mode bits don't exist on NTFS (Go reports 0666);
+		// access there is governed by the per-user profile ACL.
+		t.Skip("posix permissions are not meaningful on windows")
+	}
 	path := filepath.Join(t.TempDir(), "minipulse", "config.json")
 	if err := WriteExample(path); err != nil {
 		t.Fatal(err)

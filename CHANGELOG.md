@@ -7,6 +7,14 @@ GitHub releases.
 ## [Unreleased]
 
 ### Added
+- **Windows support** (10/11 + Server, amd64): same dashboard/API as
+  a foreground binary or a proper Windows Service (`service
+  install`, auto-start, restart on crash). Windows collectors:
+  services via SCM, listening ports via the connection table,
+  Docker over the named pipe, NTFS-reparse-safe disk walks.
+  Watts/temperatures are unavailable (no sudoless power source on
+  Windows); everything else works. Release gains a
+  `-windows-amd64.zip` built on a Windows runner.
 - Release tarballs now ship a `.sha256` checksum file next to each
   download so the tarball's integrity can be checked
   (`shasum -a 256 -c …`). This is corruption detection, not a

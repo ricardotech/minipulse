@@ -7,8 +7,8 @@ import (
 	"golang.org/x/sys/unix"
 )
 
-// macModel returns the hardware model identifier, e.g. "Mac16,10".
-func macModel() string {
+// platformModel returns the hardware model identifier, e.g. "Mac16,10".
+func platformModel() string {
 	s, err := unix.Sysctl("hw.model")
 	if err != nil {
 		return ""
@@ -16,11 +16,11 @@ func macModel() string {
 	return s
 }
 
-// macComputerName returns the friendly name ("Ricardo's Mac mini").
+// platformComputerName returns the friendly name ("Ricardo's Mac mini").
 // kern.hostname on a home network is often an IP or a DHCP lease name,
 // which makes a poor dashboard title. Absolute path: launchd's PATH
 // does not include /usr/sbin.
-func macComputerName() string {
+func platformComputerName() string {
 	out, err := exec.Command("/usr/sbin/scutil", "--get", "ComputerName").Output()
 	if err != nil {
 		return ""
@@ -28,8 +28,8 @@ func macComputerName() string {
 	return strings.TrimSpace(string(out))
 }
 
-// macOSVersion returns e.g. "macOS 27.2" from kern.osproductversion.
-func macOSVersion() string {
+// platformOSVersion returns e.g. "macOS 27.2" from kern.osproductversion.
+func platformOSVersion() string {
 	v, err := unix.Sysctl("kern.osproductversion")
 	if err != nil || v == "" {
 		return ""
@@ -37,10 +37,10 @@ func macOSVersion() string {
 	return "macOS " + v
 }
 
-// macBootTime returns the boot time as Unix seconds (kern.boottime),
+// platformBootTime returns the boot time as Unix seconds (kern.boottime),
 // read natively instead of via gopsutil (which was observed to fail
 // wholesale under launchd).
-func macBootTime() int64 {
+func platformBootTime() int64 {
 	tv, err := unix.SysctlTimeval("kern.boottime")
 	if err != nil {
 		return 0

@@ -53,18 +53,18 @@ func HostInfo() model.HostInfo {
 		hi.UptimeS = info.Uptime
 		hi.BootTime = int64(info.BootTime)
 	}
-	if name := macComputerName(); name != "" {
+	if name := platformComputerName(); name != "" {
 		hi.Hostname = name
 	}
 	// Native fallbacks: host.Info() can fail wholesale under launchd,
 	// leaving the dashboard header blank.
 	if hi.OS == "" || strings.HasPrefix(hi.OS, "darwin") {
-		if v := macOSVersion(); v != "" {
+		if v := platformOSVersion(); v != "" {
 			hi.OS = v
 		}
 	}
 	if hi.BootTime == 0 {
-		hi.BootTime = macBootTime()
+		hi.BootTime = platformBootTime()
 	}
 	if hi.BootTime > 0 {
 		hi.UptimeS = uint64(time.Now().Unix() - hi.BootTime)
@@ -72,7 +72,7 @@ func HostInfo() model.HostInfo {
 	if infos, err := cpu.Info(); err == nil && len(infos) > 0 {
 		hi.Chip = infos[0].ModelName
 	}
-	hi.Model = macModel()
+	hi.Model = platformModel()
 	if vm, err := mem.VirtualMemory(); err == nil {
 		hi.MemTotal = vm.Total
 	}
@@ -111,8 +111,7 @@ func (s *System) Sample(now time.Time) model.Sample {
 	if ioMap, err := disk.IOCounters(); err == nil {
 		var read, write uint64
 		for name, io := range ioMap {
-			// Whole disks only (disk0, disk4…), not APFS slices (disk3s1).
-			if strings.Contains(name, "s") && !isWholeDisk(name) {
+			if !countDiskIO(name) {
 				continue
 			}
 			read += io.ReadBytes
@@ -127,16 +126,6 @@ func (s *System) Sample(now time.Time) model.Sample {
 	s.lastTime = now
 	sm.Volumes = Volumes()
 	return sm
-}
-
-func isWholeDisk(name string) bool {
-	// "disk0" yes, "disk3s1" no.
-	for _, r := range strings.TrimPrefix(name, "disk") {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 func rate(now, prev uint64, dt float64) float64 {
@@ -190,26 +179,15 @@ func Volumes() []model.Volume {
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
-		if out[i].Mount == "/" {
+		if out[i].Mount == rootMount() {
 			return true
 		}
-		if out[j].Mount == "/" {
+		if out[j].Mount == rootMount() {
 			return false
 		}
 		return out[i].Total > out[j].Total
 	})
 	return out
-}
-
-// isRealMount filters APFS system slices that would double-count "/".
-func isRealMount(mount string) bool {
-	if mount == "/" {
-		return true
-	}
-	if strings.HasPrefix(mount, "/Volumes/") {
-		return mount != "/Volumes/Recovery"
-	}
-	return false // /System/Volumes/* etc. share the root container
 }
 
 // TopProcesses returns processes sorted by memory (or CPU when byCPU),

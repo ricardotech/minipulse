@@ -63,20 +63,16 @@ type Config struct {
 	AlertCooldownMinutes int     `json:"alert_cooldown_minutes"`
 }
 
-// Dir is the per-user config directory.
-func Dir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".config", "minipulse")
-}
+// Dir is the per-user config directory (platform-specific: see
+// paths_*.go).
+func Dir() string { return platformConfigDir() }
 
 // DefaultPath is where Load looks when no --config flag is given.
 func DefaultPath() string { return filepath.Join(Dir(), "config.json") }
 
-// DefaultDataDir is where the SQLite database lives by default.
-func DefaultDataDir() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, ".local", "share", "minipulse")
-}
+// DefaultDataDir is where the SQLite database lives by default
+// (platform-specific: see paths_*.go).
+func DefaultDataDir() string { return platformDataDir() }
 
 // Defaults returns a fully-populated default configuration.
 func Defaults() *Config {
@@ -189,13 +185,16 @@ func clampConfig(cfg *Config) {
 	}
 }
 
-// ExpandHome expands a leading "~/" (or bare "~") to the home directory.
+// ExpandHome expands a leading "~/" (or bare "~") to the home
+// directory. The Windows "~" spelling is accepted on every
+// platform (a config written on one OS shouldn't silently become
+// a CWD-relative path on the other).
 func ExpandHome(p string) string {
 	if p == "~" {
 		home, _ := os.UserHomeDir()
 		return home
 	}
-	if strings.HasPrefix(p, "~/") {
+	if strings.HasPrefix(p, "~/") || strings.HasPrefix(p, `~\`) {
 		home, _ := os.UserHomeDir()
 		return filepath.Join(home, p[2:])
 	}

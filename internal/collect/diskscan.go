@@ -39,6 +39,9 @@ func ScanDir(root string, minBytes int64) ScanResult {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil // never follow symlinks: avoids cycles and double counts
 		}
+		if d.IsDir() && path != root && isReparsePoint(path, d) {
+			return fs.SkipDir // NTFS junction: same reasoning as symlinks
+		}
 		if d.IsDir() {
 			if _, ok := dirSizes[path]; !ok {
 				dirSizes[path] = 0

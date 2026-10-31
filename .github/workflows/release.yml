@@ -19,23 +19,40 @@ jobs:
         include:
           - runner: macos-latest # Apple Silicon
             arch: arm64
+            asset: darwin-arm64
           - runner: macos-15-intel
             arch: amd64
+            asset: darwin-amd64
+          - runner: windows-latest
+            arch: amd64
+            asset: windows-amd64
     runs-on: ${{ matrix.runner }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Build
+      - name: Build (macOS)
+        if: runner.os != 'Windows'
         run: |
           make build VERSION=${{ github.ref_name }}
-          tar -czf minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz minipulse README.md LICENSE
-          shasum -a 256 minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz > minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
+          tar -czf minipulse-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz minipulse README.md LICENSE
+          shasum -a 256 minipulse-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz > minipulse-${{ github.ref_name }}-${{ matrix.asset }}.tar.gz.sha256
+      - name: Build (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          CGO_ENABLED: "1"
+        run: |
+          go build -trimpath -ldflags "-s -w -X main.version=${{ github.ref_name }}" -o minipulse.exe ./cmd/minipulse
+          .\minipulse.exe version
+          Compress-Archive -Path minipulse.exe, README.md, LICENSE -DestinationPath minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip
+          $h = (Get-FileHash -Algorithm SHA256 minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip).Hash.ToLower()
+          # LF explicitly: a CRLF checksum file fails `shasum -c` on unix.
+          [IO.File]::WriteAllText("minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip.sha256", "$h  minipulse-${{ github.ref_name }}-${{ matrix.asset }}.zip`n")
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: |
-            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
-            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
+          files: minipulse-${{ github.ref_name }}-${{ matrix.asset }}.*
+          fail_on_unmatched_files: true
           generate_release_notes: true

@@ -77,6 +77,22 @@ MiniPulse is built for exactly that machine: a headless mini you want to watch f
 
 MiniPulse is deliberately *not* a menu-bar app, fan controller, or multi-OS fleet manager — neighbours do those better. It is the one box above, watched well.
 
+## Windows
+
+MiniPulse also runs on Windows 10/11 and Windows Server (amd64) — same dashboard, same API, for the mini-PC or server box that happens to run Windows. Download the `-windows-amd64.zip` from [Releases](https://github.com/ricardotech/minipulse/releases) (from the next release on), or build with `go build` (CGO + a MinGW gcc for the SQLite driver), then, from an **Administrator** terminal:
+
+```powershell
+.\minipulse.exe service install   # Windows Service: auto-start, restart on crash
+```
+
+Open **http://127.0.0.1:8848**. Config/data/logs for the service live in `%ProgramData%\minipulse\`; running in the foreground they live in `%APPDATA%\minipulse` / `%LOCALAPPDATA%\minipulse`.
+
+What differs from macOS:
+
+- **No watts/temperatures.** Windows has no sudoless package-power source (MSR/RAPL needs a kernel driver and admin), so the power tile reports unavailable; everything else (CPU/RAM/process history, disk deep-dive, services + listening ports, Docker via named pipe, health checks, alerts, Prometheus) works.
+- **The service runs as LocalSystem** by default so it can see every user's processes and scan every home directory (the macOS agent runs as *you*). The installer copies the binary to `%ProgramFiles%\minipulse\` and locks `%ProgramData%\minipulse\` to SYSTEM+Administrators, so edit the service config from an Administrator shell. If you prefer least privilege, change the service's log-on account in `services.msc` to a regular user **and** grant it Modify on `%ProgramData%\minipulse` — it will then only see what that user sees. See [SECURITY.md](SECURITY.md).
+- Services list shows *running* Windows services (the full list runs to hundreds of stopped entries). Docker detection is verified in foreground mode; Docker Desktop's pipe is per-user, so under LocalSystem it may report unavailable.
+
 ## See it from your phone (Tailscale)
 
 Keep MiniPulse on loopback and publish it only inside your tailnet:
@@ -90,7 +106,7 @@ For a plain LAN bind instead, generate a token first (`minipulse token`), put it
 
 ## Configuration
 
-Optional — the defaults work out of the box. Generate a file with `minipulse init-config` (written to `~/.config/minipulse/config.json`, mode `0600`).
+Optional — the defaults work out of the box. Generate a file with `minipulse init-config` (macOS: `~/.config/minipulse/config.json`, mode `0600`; Windows foreground: `%APPDATA%\minipulse\config.json`; Windows service: `%ProgramData%\minipulse\config.json`).
 
 | Field | Default | Meaning |
 |---|---|---|
@@ -177,7 +193,7 @@ flowchart LR
 
 **Does MiniPulse phone home?** Never. The only outbound calls are health checks and alert webhooks that *you* configure. The UI is embedded and works fully offline.
 
-**How do I uninstall?** `minipulse service uninstall`, delete the binary, `~/.local/share/minipulse/`, `~/.config/minipulse/` and `~/Library/Logs/minipulse/`.
+**How do I uninstall?** `minipulse service uninstall`, delete the binary, `~/.local/share/minipulse/`, `~/.config/minipulse/` and `~/Library/Logs/minipulse/`. On Windows: `minipulse.exe service uninstall` (Administrator), delete the `.exe`, `%ProgramData%\minipulse\` (service mode) and `%APPDATA%\minipulse` / `%LOCALAPPDATA%\minipulse` (foreground mode).
 
 **Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
 

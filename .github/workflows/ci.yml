@@ -25,3 +25,32 @@ jobs:
         run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
       - name: build
         run: make build && ./minipulse version
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      # The SQLite driver needs CGO; windows-latest ships MinGW gcc.
+      - name: vet
+        run: go vet ./...
+        env:
+          CGO_ENABLED: "1"
+      - name: test
+        run: go test ./...
+        env:
+          CGO_ENABLED: "1"
+      # The macOS govulncheck call graph is GOOS=darwin and never
+      # sees the Windows-only imports (go-winio, svc/mgr).
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+        env:
+          CGO_ENABLED: "1"
+      - name: build
+        run: |
+          go build -trimpath -o minipulse.exe ./cmd/minipulse
+          .\minipulse.exe version
+        env:
+          CGO_ENABLED: "1"
