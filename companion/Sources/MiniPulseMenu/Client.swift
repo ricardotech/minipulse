@@ -16,6 +16,7 @@ struct ProcRow: Decodable, Identifiable {
 
 /// API token storage: Keychain only, never UserDefaults or logs.
 enum TokenStore {
+    // Legacy id from the app's former name — keep so saved tokens survive the rename.
     private static let service = "io.github.ricardotech.minipulse.notch"
     private static let account = "api-token"
 
@@ -69,15 +70,11 @@ final class Store: ObservableObject {
     @Published var sample: MiniSample?
     @Published var state: ConnectionState = .connecting
     @Published var topProcesses: [ProcRow] = []
-    @Published var notchExpanded = false
 
     @Published var host: String {
         didSet { UserDefaults.standard.set(host, forKey: "host") }
     }
-    @Published var showNotchPanel: Bool {
-        didSet { UserDefaults.standard.set(showNotchPanel, forKey: "showNotchPanel") }
-    }
-    /// Which indicators the menu bar (and notch wings) show.
+    /// Which indicators the menu bar shows.
     /// Any subset, several at once; canonical order on display.
     @Published var enabledMetrics: [MenuBarMetric] {
         didSet { UserDefaults.standard.set(enabledMetrics.map(\.rawValue), forKey: "enabledMetrics") }
@@ -99,7 +96,6 @@ final class Store: ObservableObject {
 
     init() {
         host = UserDefaults.standard.string(forKey: "host") ?? "http://127.0.0.1:8848"
-        showNotchPanel = UserDefaults.standard.object(forKey: "showNotchPanel") as? Bool ?? true
         let saved = UserDefaults.standard.stringArray(forKey: "enabledMetrics") ?? []
         let parsed = saved.compactMap(MenuBarMetric.init(rawValue:))
         enabledMetrics = parsed.isEmpty ? MenuBarText.defaultMetrics : parsed

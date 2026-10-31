@@ -130,118 +130,6 @@ final class StatusItemController: NSObject {
     }
 }
 
-/// The notch/pill overlay: a borderless, non-activating panel above
-/// the menu bar, top-center of the notched (or main) screen. Public
-/// APIs only — no private SkyLight/CGSSpace tricks.
-///
-/// The window is FIXED size (the expanded envelope plus shadow
-/// room) and never resized; SwiftUI springs animate the silhouette
-/// inside it. A fixed transparent window would normally eat clicks
-/// across its whole frame, so a cursor poll flips
-/// `ignoresMouseEvents` based on the visible shape's reported
-/// frame: events are captured only while the cursor is actually
-/// over the black panel. (Same approach as Glance, MIT.)
-@MainActor
-final class NotchPanelController {
-    private let store: Store
-    private var panel: NSPanel?
-    private var cancellables: Set<AnyCancellable> = []
-    private var visibleRect: CGRect? // in the root view's top-down coords
-    private var cursorTimer: Timer?
-
-    init(store: Store) {
-        self.store = store
-        NotificationCenter.default.addObserver(
-            forName: NSApplication.didChangeScreenParametersNotification,
-            object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.rebuild() }
-        }
-        store.$showNotchPanel
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] _ in self?.rebuild() }
-            .store(in: &cancellables)
-        rebuild()
-    }
-
-    static func geometry(for screen: NSScreen) -> NotchGeometry {
-        if let sim = NotchGeometry.simulated(
-            from: UserDefaults.standard.string(forKey: "MiniPulseSimulateNotch")) {
-            return sim
-        }
-        return NotchGeometry(
-            screenWidth: Double(screen.frame.width),
-            safeAreaTop: Double(screen.safeAreaInsets.top),
-            auxLeftWidth: screen.auxiliaryTopLeftArea.map { Double($0.width) },
-            auxRightWidth: screen.auxiliaryTopRightArea.map { Double($0.width) })
-    }
-
-    /// Prefer the screen that actually has a notch (focus moving
-    /// to an external display changes NSScreen.main without any
-    /// screen-parameters notification); fall back to main.
-    static func targetScreen() -> NSScreen? {
-        NSScreen.screens.first { geometry(for: $0).hasNotch } ?? NSScreen.main
-    }
-
-    private func rebuild() {
-        panel?.close()
-        panel = nil
-        cursorTimer?.invalidate()
-        cursorTimer = nil
-        visibleRect = nil
-        guard store.showNotchPanel, let screen = Self.targetScreen() else { return }
-        let geo = Self.geometry(for: screen)
-        let size = geo.windowSize
-        let frame = NSRect(x: screen.frame.midX - size.width / 2,
-                           y: screen.frame.maxY - size.height,
-                           width: size.width, height: size.height)
-        let p = NSPanel(contentRect: frame,
-                        styleMask: [.borderless, .nonactivatingPanel],
-                        backing: .buffered, defer: false)
-        p.isFloatingPanel = true
-        p.level = NSWindow.Level(rawValue: NSWindow.Level.mainMenu.rawValue + 1)
-        p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
-        p.backgroundColor = .clear
-        p.isOpaque = false
-        p.hasShadow = false
-        p.isMovable = false
-        p.hidesOnDeactivate = false
-        p.animationBehavior = .none
-        // Passthrough until the cursor is over the visible shape.
-        p.ignoresMouseEvents = true
-        // Root view pins itself to the full fixed window size, so
-        // the hosting view's fitting size equals the window size
-        // and cannot drift it.
-        p.contentView = NSHostingView(rootView: NotchView(store: store, geometry: geo) { [weak self] rect in
-            self?.visibleRect = rect
-        })
-        p.orderFrontRegardless()
-        panel = p
-        // Polling, not mouse-moved events: a window that ignores
-        // mouse events receives none.
-        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.updatePassthrough() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        cursorTimer = timer
-    }
-
-    private func updatePassthrough() {
-        guard let panel, let rect = visibleRect else { return }
-        // rect is top-down within the window; convert to screen
-        // coords (AppKit origin is bottom-left).
-        let screenRect = NSRect(
-            x: panel.frame.minX + rect.minX,
-            y: panel.frame.maxY - rect.maxY,
-            width: rect.width, height: rect.height)
-        let over = screenRect.insetBy(dx: -6, dy: -6).contains(NSEvent.mouseLocation)
-        let shouldIgnore = !over
-        if panel.ignoresMouseEvents != shouldIgnore {
-            panel.ignoresMouseEvents = shouldIgnore
-        }
-    }
-}
-
 @MainActor
 final class PrefsWindowController {
     private var window: NSWindow?
@@ -252,7 +140,7 @@ final class PrefsWindowController {
         if window == nil {
             let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 420, height: 240),
                              styleMask: [.titled, .closable], backing: .buffered, defer: false)
-            w.title = "MiniPulseNotch Preferences"
+            w.title = "MiniPulseMenu Preferences"
             w.contentViewController = NSHostingController(rootView: PrefsView(store: store))
             w.isReleasedWhenClosed = false
             w.center()

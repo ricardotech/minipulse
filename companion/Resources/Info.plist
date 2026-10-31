@@ -3,11 +3,11 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleExecutable</key>
-	<string>MiniPulseNotch</string>
+	<string>MiniPulseMenu</string>
 	<key>CFBundleIdentifier</key>
-	<string>io.github.ricardotech.minipulse.notch</string>
+	<string>io.github.ricardotech.minipulse.menu</string>
 	<key>CFBundleName</key>
-	<string>MiniPulseNotch</string>
+	<string>MiniPulseMenu</string>
 	<key>CFBundleShortVersionString</key>
 	<string>0.1.0</string>
 	<key>CFBundleVersion</key>

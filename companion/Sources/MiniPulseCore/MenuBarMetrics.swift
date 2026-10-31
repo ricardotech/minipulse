@@ -1,7 +1,7 @@
 import Foundation
 
-/// One glanceable indicator the user can pin to the menu bar (and
-/// to the closed notch/pill wings). Canonical display order is the
+/// One glanceable indicator the user can pin to the menu bar.
+/// Canonical display order is the
 /// declaration order; users toggle any subset, including several
 /// at once — e.g. watts + CPU % + memory %.
 public enum MenuBarMetric: String, CaseIterable, Codable, Sendable {
@@ -63,15 +63,5 @@ public enum MenuBarText {
     public static func build(sample: MiniSample?, enabled: [MenuBarMetric]) -> String {
         let ordered = MenuBarMetric.allCases.filter { enabled.contains($0) }
         return ordered.compactMap { $0.labeledValue(in: sample) }.joined(separator: " · ")
-    }
-
-    /// Wing pair for the closed notch: first enabled metric on the
-    /// left wing, second on the right (bare values — the wings are
-    /// too narrow for labels).
-    public static func wings(sample: MiniSample?, enabled: [MenuBarMetric]) -> (left: String, right: String) {
-        let ordered = MenuBarMetric.allCases.filter { enabled.contains($0) }
-        let left = ordered.first.flatMap { $0.value(in: sample) }
-        let right = ordered.dropFirst().first.flatMap { $0.value(in: sample) }
-        return (left ?? "—W", right ?? (sample.map { String(format: "%.0f%%", $0.cpuPct) } ?? "—%"))
     }
 }

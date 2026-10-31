@@ -33,41 +33,13 @@ final class CoreTests: XCTestCase {
         XCTAssertLessThan(RunnerCadence.fps(cpuPct: 20), RunnerCadence.fps(cpuPct: 80))
     }
 
-    func testGeometryDerivesNotchFromAuxAreas() {
-        // Measured on a real MacBookPro18,4: 1512pt wide, aux 663.5 each side.
-        let g = NotchGeometry(screenWidth: 1512, safeAreaTop: 32,
-                              auxLeftWidth: 663.5, auxRightWidth: 663.5)
-        XCTAssertTrue(g.hasNotch)
-        XCTAssertEqual(g.notchWidth, 185, accuracy: 0.001)
-        XCTAssertEqual(g.notchHeight, 32)
-    }
 
-    func testGeometryNoNotchFallsBackToPill() {
-        let g = NotchGeometry(screenWidth: 3440, safeAreaTop: 0,
-                              auxLeftWidth: nil, auxRightWidth: nil)
-        XCTAssertFalse(g.hasNotch)
-        XCTAssertEqual(g.collapsedSize.width, NotchGeometry.pillClosedSize.width)
-        // Window envelope always fits the open size plus shadow room.
-        XCTAssertGreaterThan(g.windowSize.width, NotchGeometry.openSize.width)
-        XCTAssertGreaterThan(g.windowSize.height, NotchGeometry.openSize.height)
-    }
 
-    func testGeometryClosedNotchBodyHasWings() {
-        let g = NotchGeometry(screenWidth: 1512, safeAreaTop: 32,
-                              auxLeftWidth: 663.5, auxRightWidth: 663.5)
-        // 185pt cutout + one flank per side for the wing numbers.
-        XCTAssertEqual(g.closedBodySize.width, 185 + NotchGeometry.notchFlankWidth * 2, accuracy: 0.001)
-        XCTAssertEqual(g.closedBodySize.height, 32)
-    }
 
-    func testSimulatedSpecParsing() {
-        XCTAssertEqual(NotchGeometry.simulated(from: "185x32")?.notchWidth, 185)
-        XCTAssertNil(NotchGeometry.simulated(from: "none"))
-        XCTAssertNil(NotchGeometry.simulated(from: "banana"))
-        XCTAssertNil(NotchGeometry.simulated(from: nil))
-        // Absurd specs clamp instead of building a giant window.
-        XCTAssertEqual(NotchGeometry.simulated(from: "99999x99999")?.notchWidth, 400)
-    }
+
+
+
+
 
     func testDaemonTimeParsesGoNanoAndDrivesFreshness() throws {
         let json = #"{"sys_w":1,"soc_w":1,"cpu_pct":1,"mem_pct":1,"cpu_temp_c":1,"gpu_temp_c":1,"fan_rpm":1,"power_available":true,"wh_total":1,"time":"2026-10-31T10:15:11.619407-03:00"}"#
@@ -94,10 +66,6 @@ final class CoreTests: XCTestCase {
         // Fanless Mac: fan metric drops out instead of showing 0.
         var fanless = s; fanless.fanRPM = 0
         XCTAssertEqual(MenuBarText.build(sample: fanless, enabled: [.fan]), "")
-        // Wings: bare values, watts left / CPU right by default.
-        let w = MenuBarText.wings(sample: s, enabled: MenuBarText.defaultMetrics)
-        XCTAssertEqual(w.left, "18W")
-        XCTAssertEqual(w.right, "23%")
     }
 
     func testHostValidation() {

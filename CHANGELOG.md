@@ -7,6 +7,11 @@ GitHub releases.
 ## [Unreleased]
 
 ### Added
+- **Menu-bar companion** (`companion/`, MiniPulseMenu): pulse runner
+  + pick-your-own indicators in the macOS menu bar, plus a
+  SwiftBar/xbar example plugin, both fed by the new `/api/mini`
+  endpoint and `/api/stream`. A MacBook-notch surface was built
+  and then removed before release — menu bar only.
 - **Windows support** (10/11 + Server, amd64): same dashboard/API as
   a foreground binary or a proper Windows Service (`service
   install`, auto-start, restart on crash). Windows collectors:

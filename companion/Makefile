@@ -1,5 +1,5 @@
-APP := MiniPulseNotch.app
-BIN := .build/release/MiniPulseNotch
+APP := MiniPulseMenu.app
+BIN := .build/release/MiniPulseMenu
 
 .PHONY: build test app clean
 
@@ -15,7 +15,7 @@ test:
 app: build
 	rm -rf $(APP)
 	mkdir -p $(APP)/Contents/MacOS
-	cp $(BIN) $(APP)/Contents/MacOS/MiniPulseNotch
+	cp $(BIN) $(APP)/Contents/MacOS/MiniPulseMenu
 	cp Resources/Info.plist $(APP)/Contents/Info.plist
 	codesign --force --sign - $(APP)
 
