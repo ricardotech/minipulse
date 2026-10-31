@@ -2,8 +2,10 @@
 
 Phase 0 of the [notch companion issue](https://github.com/ricardotech/minipulse/issues/2):
 glanceable MiniPulse stats — **watts first**, then CPU — in the macOS
-menu bar, with zero native code. This validates the demand before a
-Swift companion (menu-bar runner + notch panel) is built.
+menu bar, with zero native code. It prefers the cheap
+`GET /api/mini` endpoint and falls back to `/api/overview` on older
+daemons. Redirects are never followed, so the API token can never
+be re-sent to a different origin.
 
 The menu bar shows e.g. `31W · 11%`. The dropdown adds SoC/CPU/GPU
 watts, temperatures, fan, memory, today's energy (kWh, cost, peak)
