@@ -27,6 +27,11 @@ func TestMiniRouteAuthAndWarmingUp(t *testing.T) {
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Errorf("before first sample: got %d, want 503", rec.Code)
 	}
+	// Non-GET falls through to the static catch-all (same as every
+	// other GET route in this mux): it must never serve the payload.
+	if rec := do(h, "POST", "http://127.0.0.1:8848/api/mini", map[string]string{"X-MiniPulse-Token": "secret-token"}); rec.Code != http.StatusNotFound {
+		t.Errorf("POST: got %d, want 404 from static catch-all", rec.Code)
+	}
 }
 
 func TestMiniViewFlattensGlanceableFields(t *testing.T) {

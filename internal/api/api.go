@@ -232,7 +232,12 @@ func (s *Server) mini(w http.ResponseWriter, r *http.Request) {
 	}
 	var top *model.Process
 	if r.URL.Query().Get("top") == "1" {
-		if procs, err := s.coll.TopProcesses(true, 1); err == nil && len(procs) > 0 {
+		procs, err := s.coll.TopProcesses(true, 1)
+		if err != nil {
+			// The glanceable payload still serves without its
+			// decoration, but the failure must be visible somewhere.
+			slog.Warn("api/mini: top process lookup failed", "err", err)
+		} else if len(procs) > 0 {
 			top = &procs[0]
 		}
 	}
