@@ -67,9 +67,21 @@ final class StatusItemController: NSObject {
             }))
         store.$sample
             .receive(on: RunLoop.main)
-            .sink { [weak self] sample in
-                self?.item.button?.title = sample?.wattsLabel ?? "—W"
-                self?.reschedule(cpu: sample?.cpuPct ?? 0)
+            .sink { [weak self] _ in
+                self?.refreshTitle()
+                self?.reschedule(cpu: self?.store.sample?.cpuPct ?? 0)
+            }
+            .store(in: &cancellables)
+        store.$enabledMetrics
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshTitle() }
+            .store(in: &cancellables)
+        store.$showRunner
+            .receive(on: RunLoop.main)
+            .sink { [weak self] show in
+                guard let self else { return }
+                item.button?.image = show ? PulseFrames.frame(frameIndex) : nil
+                reschedule(cpu: store.sample?.cpuPct ?? 0)
             }
             .store(in: &cancellables)
         // Energy budget: stop animating while the display sleeps.
@@ -83,9 +95,14 @@ final class StatusItemController: NSObject {
         reschedule(cpu: 0)
     }
 
+    private func refreshTitle() {
+        let text = MenuBarText.build(sample: store.sample, enabled: store.enabledMetrics)
+        item.button?.title = text.isEmpty ? (store.sample?.wattsLabel ?? "—W") : text
+    }
+
     private func reschedule(cpu: Double) {
         timer?.invalidate()
-        guard !paused else { return }
+        guard !paused, store.showRunner else { return }
         // Animation cadence is decoupled from the 2s sample cadence:
         // frames interpolate the latest known load.
         timer = Timer.scheduledTimer(withTimeInterval: RunnerCadence.frameInterval(cpuPct: cpu),
@@ -114,15 +131,23 @@ final class StatusItemController: NSObject {
 }
 
 /// The notch/pill overlay: a borderless, non-activating panel above
-/// the menu bar, top-center of the main screen. Public APIs only
-/// (window level + collection behaviour) — no private SkyLight /
-/// CGSSpace tricks, so no lock-screen presence and no fragility
-/// beyond the documented contract.
+/// the menu bar, top-center of the notched (or main) screen. Public
+/// APIs only — no private SkyLight/CGSSpace tricks.
+///
+/// The window is FIXED size (the expanded envelope plus shadow
+/// room) and never resized; SwiftUI springs animate the silhouette
+/// inside it. A fixed transparent window would normally eat clicks
+/// across its whole frame, so a cursor poll flips
+/// `ignoresMouseEvents` based on the visible shape's reported
+/// frame: events are captured only while the cursor is actually
+/// over the black panel. (Same approach as Glance, MIT.)
 @MainActor
 final class NotchPanelController {
     private let store: Store
     private var panel: NSPanel?
     private var cancellables: Set<AnyCancellable> = []
+    private var visibleRect: CGRect? // in the root view's top-down coords
+    private var cursorTimer: Timer?
 
     init(store: Store) {
         self.store = store
@@ -131,18 +156,10 @@ final class NotchPanelController {
             object: nil, queue: .main) { [weak self] _ in
             MainActor.assumeIsolated { self?.rebuild() }
         }
-        // dropFirst: @Published replays the current value on
-        // subscribe, which would rebuild/resize redundantly at
-        // launch (the explicit rebuild() below covers startup).
         store.$showNotchPanel
             .dropFirst()
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in self?.rebuild() }
-            .store(in: &cancellables)
-        store.$notchExpanded
-            .dropFirst()
-            .receive(on: RunLoop.main)
-            .sink { [weak self] expanded in self?.resizeForExpanded(expanded) }
             .store(in: &cancellables)
         rebuild()
     }
@@ -166,23 +183,18 @@ final class NotchPanelController {
         NSScreen.screens.first { geometry(for: $0).hasNotch } ?? NSScreen.main
     }
 
-    private var collapsedHeight: Double = 32
-    private let expandedHeight: Double = 190
-
     private func rebuild() {
-        // close(), not orderOut: $showNotchPanel fires on subscribe,
-        // so init rebuilds twice; an ordered-out first panel stayed
-        // alive (retained via its hosting view) as a ghost window.
         panel?.close()
         panel = nil
+        cursorTimer?.invalidate()
+        cursorTimer = nil
+        visibleRect = nil
         guard store.showNotchPanel, let screen = Self.targetScreen() else { return }
         let geo = Self.geometry(for: screen)
-        collapsedHeight = geo.collapsedSize.height
-        let width = geo.collapsedSize.width + 60
-        let height = store.notchExpanded ? expandedHeight : collapsedHeight
-        let frame = NSRect(x: screen.frame.midX - width / 2,
-                           y: screen.frame.maxY - height,
-                           width: width, height: height)
+        let size = geo.windowSize
+        let frame = NSRect(x: screen.frame.midX - size.width / 2,
+                           y: screen.frame.maxY - size.height,
+                           width: size.width, height: size.height)
         let p = NSPanel(contentRect: frame,
                         styleMask: [.borderless, .nonactivatingPanel],
                         backing: .buffered, defer: false)
@@ -194,29 +206,39 @@ final class NotchPanelController {
         p.hasShadow = false
         p.isMovable = false
         p.hidesOnDeactivate = false
-        // The window is exactly the visible shape: collapsed it is
-        // one 32pt band (no transparent click-eating area below
-        // the pill), and it grows only while the flyout is open.
-        // The hosting view goes in as a plain subview with an
-        // explicit frame: as contentView its intrinsic-size
-        // behaviour resized the WINDOW to the SwiftUI fitting size
-        // on every sample (observed drifting to 358x72, 54pt below
-        // the top edge).
-        let host = NSHostingView(rootView: NotchView(store: store, geometry: geo))
-        host.frame = NSRect(x: 0, y: 0, width: width, height: height)
-        host.autoresizingMask = [.width, .height]
-        p.contentView?.addSubview(host)
+        p.animationBehavior = .none
+        // Passthrough until the cursor is over the visible shape.
+        p.ignoresMouseEvents = true
+        // Root view pins itself to the full fixed window size, so
+        // the hosting view's fitting size equals the window size
+        // and cannot drift it.
+        p.contentView = NSHostingView(rootView: NotchView(store: store, geometry: geo) { [weak self] rect in
+            self?.visibleRect = rect
+        })
         p.orderFrontRegardless()
         panel = p
+        // Polling, not mouse-moved events: a window that ignores
+        // mouse events receives none.
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.updatePassthrough() }
+        }
+        RunLoop.main.add(timer, forMode: .common)
+        cursorTimer = timer
     }
 
-    private func resizeForExpanded(_ expanded: Bool) {
-        guard let p = panel, let screen = p.screen ?? Self.targetScreen() else { return }
-        let height = expanded ? expandedHeight : collapsedHeight
-        var f = p.frame
-        f.origin.y = screen.frame.maxY - height
-        f.size.height = height
-        p.setFrame(f, display: true, animate: true)
+    private func updatePassthrough() {
+        guard let panel, let rect = visibleRect else { return }
+        // rect is top-down within the window; convert to screen
+        // coords (AppKit origin is bottom-left).
+        let screenRect = NSRect(
+            x: panel.frame.minX + rect.minX,
+            y: panel.frame.maxY - rect.maxY,
+            width: rect.width, height: rect.height)
+        let over = screenRect.insetBy(dx: -6, dy: -6).contains(NSEvent.mouseLocation)
+        let shouldIgnore = !over
+        if panel.ignoresMouseEvents != shouldIgnore {
+            panel.ignoresMouseEvents = shouldIgnore
+        }
     }
 }
 

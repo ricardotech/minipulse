@@ -77,6 +77,14 @@ final class Store: ObservableObject {
     @Published var showNotchPanel: Bool {
         didSet { UserDefaults.standard.set(showNotchPanel, forKey: "showNotchPanel") }
     }
+    /// Which indicators the menu bar (and notch wings) show.
+    /// Any subset, several at once; canonical order on display.
+    @Published var enabledMetrics: [MenuBarMetric] {
+        didSet { UserDefaults.standard.set(enabledMetrics.map(\.rawValue), forKey: "enabledMetrics") }
+    }
+    @Published var showRunner: Bool {
+        didSet { UserDefaults.standard.set(showRunner, forKey: "showRunner") }
+    }
 
     private var task: Task<Void, Never>?
     private var watcherTask: Task<Void, Never>?
@@ -92,6 +100,18 @@ final class Store: ObservableObject {
     init() {
         host = UserDefaults.standard.string(forKey: "host") ?? "http://127.0.0.1:8848"
         showNotchPanel = UserDefaults.standard.object(forKey: "showNotchPanel") as? Bool ?? true
+        let saved = UserDefaults.standard.stringArray(forKey: "enabledMetrics") ?? []
+        let parsed = saved.compactMap(MenuBarMetric.init(rawValue:))
+        enabledMetrics = parsed.isEmpty ? MenuBarText.defaultMetrics : parsed
+        showRunner = UserDefaults.standard.object(forKey: "showRunner") as? Bool ?? true
+    }
+
+    func toggleMetric(_ metric: MenuBarMetric) {
+        if enabledMetrics.contains(metric) {
+            enabledMetrics.removeAll { $0 == metric }
+        } else {
+            enabledMetrics.append(metric)
+        }
     }
 
     var baseURL: URL? {

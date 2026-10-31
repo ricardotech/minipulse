@@ -6,18 +6,27 @@ personal Mac (issue [#2](https://github.com/ricardotech/minipulse/issues/2)),
 a separate client of the daemon's HTTP API:
 
 - **Menu bar:** an original pulse runner whose speed tracks CPU
-  load, next to the live wattage. Click for full stats, top CPU
-  processes and a dashboard shortcut.
-- **Notch / pill:** on a notched MacBook the panel hugs the notch —
-  watts on the left wing, CPU % on the right (the camera housing is
-  opaque; nothing is drawn under it). Hover expands a stats flyout.
-  On Macs without a notch (mini, iMac, external displays) the same
-  panel is a small floating pill at the top-centre.
+  load, next to **customizable indicators** — pin any subset of
+  watts, CPU %, memory %, CPU temperature and fan side by side
+  (e.g. `18W · CPU 23% · MEM 61%`) in Preferences. Click for full
+  stats, top CPU processes and a dashboard shortcut.
+- **Notch / pill:** a Dynamic-Island-style black silhouette with
+  concave flare into the menu bar grows out of the physical notch
+  on spring physics. At rest the first two enabled indicators ride
+  the wings beside the camera housing (nothing is drawn under it);
+  hover expands the full stats card (hero watts, CPU/MEM bars,
+  temps, top process; click opens the dashboard). On Macs without
+  a notch the same panel is a floating pill at the top-centre.
+  The window is fixed-size and passes clicks through everywhere
+  outside the visible shape.
 
-Clean-room Swift on public AppKit/SwiftUI APIs only. Notch geometry
-is derived at runtime from `NSScreen.safeAreaInsets` and the
+Original Swift on public AppKit/SwiftUI APIs. Notch geometry is
+derived at runtime from `NSScreen.safeAreaInsets` and the
 auxiliary top areas — no per-model dimensions, no private
-SkyLight/CGSSpace tricks, no third-party code or assets.
+SkyLight/CGSSpace tricks. The silhouette's continuous-corner
+extraction is adapted from [Glance](https://github.com/jonnyoo/glance)
+(© Jonathan Zhou) under the MIT License, credited in
+`NotchShape.swift`; everything else is original to this project.
 
 ## Build & run
 

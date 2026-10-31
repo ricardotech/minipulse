@@ -71,13 +71,53 @@ public struct NotchGeometry: Equatable, Sendable {
         return g
     }
 
-    /// Collapsed pill size: with a notch, the pill hugs it (wings on
-    /// both sides carry the numbers; the housing itself is opaque).
-    /// Without one, a small floating pill where the notch would be.
-    public var collapsedSize: (width: Double, height: Double) {
-        if hasNotch { return (notchWidth + 150, max(notchHeight, 32)) }
-        return (190, 32)
+    // Silhouette tuning, in the spirit of the well-crafted open
+    // source notch overlays (Glance, MIT): concave flare into the
+    // menu bar on top, big continuous bottom corners when open.
+    public static let closedTopRadius: Double = 8
+    public static let closedBottomRadius: Double = 12
+    public static let openTopRadius: Double = 16
+    public static let openBottomRadius: Double = 44
+    /// Resting notch state already shows stats on wings flanking
+    /// the physical cutout, so the closed body is the cutout plus
+    /// one flank per side.
+    public static let notchFlankWidth: Double = 52
+    public static let openSize: (width: Double, height: Double) = (304, 174)
+    public static let pillClosedSize: (width: Double, height: Double) = (176, 30)
+    public static let pillTopGap: Double = 3
+    /// Room for the in-content shadow (the window has none).
+    public static let shadowPadding: Double = 24
+    public static let hoverBump: Double = 6
+
+    // Open/close springs: opening overshoots slightly, closing is
+    // critically damped.
+    public static let openSpringResponse: Double = 0.45
+    public static let openSpringDamping: Double = 0.7
+    public static let closeSpringResponse: Double = 0.45
+    public static let closeSpringDamping: Double = 1.0
+
+    /// Visible black body at rest (before flare allowance).
+    public var closedBodySize: (width: Double, height: Double) {
+        if hasNotch {
+            return (notchWidth + Self.notchFlankWidth * 2, max(notchHeight, 32))
+        }
+        return Self.pillClosedSize
     }
+
+    /// Fixed window envelope: created once, never resized. All
+    /// growth is SwiftUI animating the shape inside it.
+    public var windowSize: (width: Double, height: Double) {
+        let contentWidth = max(Self.openSize.width, closedBodySize.width)
+            + (hasNotch ? Self.openTopRadius * 2 : 0)
+        return (
+            width: contentWidth + Self.shadowPadding * 2 + Self.hoverBump,
+            height: Self.openSize.height + Self.shadowPadding + Self.hoverBump
+                + (hasNotch ? 0 : Self.pillTopGap)
+        )
+    }
+
+    /// Back-compat for callers that only need a resting size.
+    public var collapsedSize: (width: Double, height: Double) { closedBodySize }
 }
 
 /// The daemon base URL is free text in Preferences and persisted in

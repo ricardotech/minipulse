@@ -46,7 +46,18 @@ final class CoreTests: XCTestCase {
         let g = NotchGeometry(screenWidth: 3440, safeAreaTop: 0,
                               auxLeftWidth: nil, auxRightWidth: nil)
         XCTAssertFalse(g.hasNotch)
-        XCTAssertEqual(g.collapsedSize.width, 190)
+        XCTAssertEqual(g.collapsedSize.width, NotchGeometry.pillClosedSize.width)
+        // Window envelope always fits the open size plus shadow room.
+        XCTAssertGreaterThan(g.windowSize.width, NotchGeometry.openSize.width)
+        XCTAssertGreaterThan(g.windowSize.height, NotchGeometry.openSize.height)
+    }
+
+    func testGeometryClosedNotchBodyHasWings() {
+        let g = NotchGeometry(screenWidth: 1512, safeAreaTop: 32,
+                              auxLeftWidth: 663.5, auxRightWidth: 663.5)
+        // 185pt cutout + one flank per side for the wing numbers.
+        XCTAssertEqual(g.closedBodySize.width, 185 + NotchGeometry.notchFlankWidth * 2, accuracy: 0.001)
+        XCTAssertEqual(g.closedBodySize.height, 32)
     }
 
     func testSimulatedSpecParsing() {
@@ -65,6 +76,28 @@ final class CoreTests: XCTestCase {
         XCTAssertEqual(s.time?.timeIntervalSince1970 ?? 0, 1793452511.619, accuracy: 0.01)
         XCTAssertNil(MiniPulseJSON.parseDaemonTime("not-a-date"))
         XCTAssertNil(MiniPulseJSON.parseDaemonTime(nil))
+    }
+
+    func testMenuBarTextBuildsEnabledSubsetInCanonicalOrder() {
+        let s = MiniSample(sysW: 18.4, socW: 9, cpuPct: 23, memPct: 61, cpuTempC: 64,
+                           gpuTempC: 58, fanRPM: 1200, powerAvailable: true, whTotal: 10)
+        // Default trio the user asked for: watts + CPU% + MEM%.
+        XCTAssertEqual(MenuBarText.build(sample: s, enabled: MenuBarText.defaultMetrics),
+                       "18W · CPU 23% · MEM 61%")
+        // Toggle order does not matter; canonical order wins.
+        XCTAssertEqual(MenuBarText.build(sample: s, enabled: [.memory, .watts]),
+                       "18W · MEM 61%")
+        XCTAssertEqual(MenuBarText.build(sample: s, enabled: [.fan, .cpuTemp]),
+                       "64° · 1200 rpm")
+        XCTAssertEqual(MenuBarText.build(sample: nil, enabled: MenuBarText.defaultMetrics), "")
+        XCTAssertEqual(MenuBarText.build(sample: s, enabled: []), "")
+        // Fanless Mac: fan metric drops out instead of showing 0.
+        var fanless = s; fanless.fanRPM = 0
+        XCTAssertEqual(MenuBarText.build(sample: fanless, enabled: [.fan]), "")
+        // Wings: bare values, watts left / CPU right by default.
+        let w = MenuBarText.wings(sample: s, enabled: MenuBarText.defaultMetrics)
+        XCTAssertEqual(w.left, "18W")
+        XCTAssertEqual(w.right, "23%")
     }
 
     func testHostValidation() {
