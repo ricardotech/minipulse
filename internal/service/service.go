@@ -15,6 +15,9 @@ import (
 // Label is the launchd job label.
 const Label = "io.github.ricardotech.minipulse"
 
+// Absolute path: system tools are never resolved through PATH.
+const launchctl = "/bin/launchctl"
+
 // PlistPath is where the LaunchAgent plist lives.
 func PlistPath() string {
 	home, _ := os.UserHomeDir()
@@ -86,8 +89,8 @@ func Install(binary, configPath string) error {
 	if err := os.WriteFile(plist, []byte(RenderPlist(binary, configPath)), 0o644); err != nil {
 		return err
 	}
-	_ = run("launchctl", "unload", plist) // ok if not loaded yet
-	if err := run("launchctl", "load", "-w", plist); err != nil {
+	_ = run(launchctl, "unload", plist) // ok if not loaded yet
+	if err := run(launchctl, "load", "-w", plist); err != nil {
 		return fmt.Errorf("launchctl load: %w", err)
 	}
 	return nil
@@ -96,7 +99,7 @@ func Install(binary, configPath string) error {
 // Uninstall unloads the job and removes the plist.
 func Uninstall() error {
 	plist := PlistPath()
-	_ = run("launchctl", "unload", plist)
+	_ = run(launchctl, "unload", plist)
 	if err := os.Remove(plist); err != nil && !os.IsNotExist(err) {
 		return err
 	}
@@ -105,7 +108,7 @@ func Uninstall() error {
 
 // Status prints launchctl's view of the job ("" when not loaded).
 func Status() (string, error) {
-	out, err := exec.Command("launchctl", "list", Label).CombinedOutput()
+	out, err := exec.Command(launchctl, "list", Label).CombinedOutput()
 	if err != nil {
 		return "", nil // not loaded
 	}

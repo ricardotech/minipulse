@@ -3,12 +3,18 @@ on:
   push:
     tags: ["v*"]
 
+# A manual re-run must not edit the same release concurrently.
+concurrency: release-${{ github.ref_name }}
+
 permissions:
   contents: write
 
 jobs:
   build:
     strategy:
+      # Both jobs create/edit the same release; run them sequentially
+      # so they can't race each other on the tag.
+      max-parallel: 1
       matrix:
         include:
           - runner: macos-latest # Apple Silicon
@@ -25,8 +31,11 @@ jobs:
         run: |
           make build VERSION=${{ github.ref_name }}
           tar -czf minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz minipulse README.md LICENSE
+          shasum -a 256 minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz > minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
       - name: Upload to release
         uses: softprops/action-gh-release@v2
         with:
-          files: minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
+          files: |
+            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz
+            minipulse-${{ github.ref_name }}-darwin-${{ matrix.arch }}.tar.gz.sha256
           generate_release_notes: true

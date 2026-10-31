@@ -1,7 +1,8 @@
 <p align="center">
   <h1 align="center">MiniPulse</h1>
-  <p align="center"><strong>The heartbeat of your Mac mini server.</strong><br>
-  A tiny, always-on web dashboard for a Mac mini (or any Apple Silicon Mac) running as a home server:<br>
+  <p align="center"><strong>The heartbeat of your Mac.</strong><br>
+  A tiny (“mini”) always-on web dashboard for any Apple Silicon Mac — mini, MacBook, iMac or Studio —<br>
+  whether it runs 24/7 as a home server or it is simply the Mac you use every day:<br>
   live watts &amp; energy cost, CPU/RAM history, the processes behind them, and where your disk is going.</p>
   <p align="center">
     <a href="https://github.com/ricardotech/minipulse/actions/workflows/ci.yml"><img src="https://github.com/ricardotech/minipulse/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
@@ -12,7 +13,7 @@
   </p>
 </p>
 
-![MiniPulse dashboard — live watts, per-core CPU, memory, storage and the disk deep-dive running on a Mac mini M6](docs/dashboard.png)
+![MiniPulse dashboard — live watts, per-core CPU, memory, storage and the disk deep-dive on an Apple Silicon Mac](docs/dashboard.png)
 
 ## Quick start
 
@@ -26,7 +27,7 @@ minipulse service install   # launchd: starts at login, restarts on crash
 
 Open **http://127.0.0.1:8848**. That's it — no accounts, no cloud, no sudo.
 
-No Go toolchain? Download a binary from [Releases](https://github.com/ricardotech/minipulse/releases). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`.
+No Go toolchain? Download a tarball from [Releases](https://github.com/ricardotech/minipulse/releases); from the next release on, each ships a `.sha256` file so you can check the download isn't corrupted (`cd` to the download folder, then `shasum -a 256 -c minipulse-<version>-darwin-<arch>.tar.gz.sha256` — an integrity check, not a signature). MiniPulse is not code-signed (yet), so after extracting, clear the quarantine flag once: `xattr -d com.apple.quarantine ./minipulse`. Prefer not to? `go install` above builds from source and skips quarantine entirely.
 
 ## Why?
 
@@ -38,6 +39,8 @@ A base-model Mac mini is now the home server of choice: ~5 W idle, silent, and f
 - **Storage** is the #2 pain: the base mini has 256 GB, and macOS answers "what's eating it?" with a grey *System Data* bar of 100 GB+. Caches, Docker images, Ollama models and AI tools grow silently until the disk is full at 3 a.m.
 
 MiniPulse is built for exactly that machine: a headless mini you want to watch from your laptop or phone, over your own network, with history and alerts — and nothing leaving the house. The landscape survey behind these choices, exact same-name aggregation semantics included, is in [docs/RESEARCH.md](docs/RESEARCH.md).
+
+**Not just for servers.** The same questions hit an everyday MacBook or iMac: *why is the fan spinning and the battery draining — which process, and since when?* (process history + spike events) and *my disk filled up again — which cache grew, Xcode's DerivedData, Docker images, a browser cache, an Ollama model?* (the "what grew" diff). MiniPulse is **read-only** towards your data: it tells you what and where, and never deletes your files — you stay in charge of the cleanup. On a laptop, consider `disk_scan_interval_minutes: 0` (scan on demand from the dashboard) so a full home-directory walk never competes with your battery.
 
 ## Features
 
@@ -176,7 +179,11 @@ flowchart LR
 
 **How do I uninstall?** `minipulse service uninstall`, delete the binary, `~/.local/share/minipulse/`, `~/.config/minipulse/` and `~/Library/Logs/minipulse/`.
 
-**Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac mini's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
+**Why not use Beszel/Netdata/Grafana?** They're good at fleets and generic infrastructure. None of them knows what a Mac's SoC is doing, what your electricity costs, or which folder grew 40 GB last night. MiniPulse also exposes `/metrics`, so they compose.
+
+**Does MiniPulse clean or delete anything?** Never touches your data files. It is a read-only observer of your data: nothing of yours is moved, emptied or deleted, and the only state-changing API call is "rescan the disk now". (It manages only its own files: config, the launchd plist from `service install`, logs, and its local SQLite database, whose old rows it prunes.) When the disk view points at a 30 GB cache, deleting it (or not) is your call — see [SECURITY.md](SECURITY.md) for the full threat model.
+
+**Will the disk scans hurt my SSD or battery?** A scan is a metadata walk (names and sizes, symlink-safe), the same reads `du` makes — no writes to your files. It does cost CPU while it runs, so on a laptop set `disk_scan_interval_minutes: 0` (from the next release on, then not even the boot-time catch-up scan runs) and rescan on demand; on an always-plugged-in Mac the hourly default is fine. Restarts don't trigger a redundant rescan while every root's last scan is still fresh.
 
 ## Development
 
@@ -191,13 +198,15 @@ The codebase is deliberately boring: stdlib HTTP, one metrics library (gopsutil)
 ## Roadmap ideas (PRs welcome)
 
 - SSD health / TBW (SMART) on the storage card
+- Known-cache labels in the disk view ("Xcode DerivedData — safe to delete, Xcode rebuilds it") so personal-Mac users can act on a finding without researching every folder first
+- Signed & notarized release binaries
 - Homebrew tap formula
-- Multi-Mac fleet view (several minis, one page)
+- Multi-Mac fleet view (several Macs, one page)
 - Per-process energy impact, now that process history exists
 
 ## Credits & license
 
 MIT — see [LICENSE](LICENSE). Built on [macmon](https://github.com/vladkens/macmon) (MIT) for wattage, [gopsutil](https://github.com/shirou/gopsutil) (BSD-3-Clause) for system metrics, and [mattn/go-sqlite3](https://github.com/mattn/go-sqlite3) (MIT).
 
-If MiniPulse saved you from a full disk at 3 a.m., a ⭐ helps other mini owners find it.
+If MiniPulse saved you from a full disk at 3 a.m., a ⭐ helps other Mac owners find it.
 

@@ -483,10 +483,14 @@ func (s *Server) disk(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if latest == nil {
+		hint := "no scan yet — POST /api/disk/scan or wait for the scheduled one"
+		if s.cfg.DiskScanIntervalMinutes <= 0 {
+			hint = "no scan yet — POST /api/disk/scan (scheduled scans are off: disk_scan_interval_minutes is 0)"
+		}
 		writeJSON(w, http.StatusOK, map[string]any{
 			"roots": roots, "root": root, "scan": nil,
 			"scan_running": s.coll.ScanRunning(),
-			"hint":         "no scan yet — POST /api/disk/scan or wait for the scheduled one",
+			"hint":         hint,
 		})
 		return
 	}

@@ -58,6 +58,6 @@ names, and power history. **Treat dashboard access as sensitive.**
 - HTTP server header/idle timeouts against slow clients; all queries
   are parameterized SQL; external tools are a fixed set invoked
   without a shell and with fixed arguments (`macmon` via PATH,
-  `/usr/sbin/lsof`, `launchctl`, `/usr/sbin/scutil`).
+  `/usr/sbin/lsof`, `/bin/launchctl`, `/usr/sbin/scutil`).
 - CI runs `go vet` + tests on every push; dependencies are checked
   with `govulncheck`.

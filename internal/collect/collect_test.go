@@ -4,7 +4,55 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
+
+	"github.com/ricardotech/minipulse/internal/config"
+	"github.com/ricardotech/minipulse/internal/model"
+	"github.com/ricardotech/minipulse/internal/store"
 )
+
+func TestScansStaleOnDemandOnly(t *testing.T) {
+	cfg := config.Defaults()
+	cfg.DiskScanIntervalMinutes = 0 // documented as "on demand only"
+	c := &Collector{cfg: cfg}       // nil store: must return before touching it
+	if c.scansStale() {
+		t.Error("interval 0 must never trigger a boot scan")
+	}
+}
+
+// Positive control for the test above: scheduled mode still asks for
+// a boot scan when none exists, and stops asking once a fresh one is
+// stored.
+func TestScansStaleScheduledMode(t *testing.T) {
+	st, err := store.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	cfg := config.Defaults()
+	cfg.DiskScanIntervalMinutes = 60
+	cfg.DiskScanRoots = []string{"/tmp/mp-test-root"}
+	c := &Collector{cfg: cfg, store: st}
+	if !c.scansStale() {
+		t.Fatal("no scan stored + scheduled mode: want stale")
+	}
+	if _, err := st.SaveDiskScan(model.DiskScan{Time: time.Now(), Root: "/tmp/mp-test-root"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if c.scansStale() {
+		t.Error("fresh scan stored: want not stale")
+	}
+}
+
+func TestLaunchctlPathExists(t *testing.T) {
+	info, err := os.Stat(launchctlPath)
+	if err != nil {
+		t.Fatalf("launchctl path %s: %v", launchctlPath, err)
+	}
+	if info.IsDir() || info.Mode()&0o111 == 0 {
+		t.Errorf("%s is not an executable file (mode %v)", launchctlPath, info.Mode())
+	}
+}
 
 // One real line captured from `macmon pipe` 0.10 on an Apple M6.
 const macmonSample = `{"all_power":0.17742818593978882,"ane_power":0.0,"cpu_power":0.15622924268245697,"cpu_tiers":[{"active_ratio":0.11169984191656113,"cores":[{"active_ratio":0.24637316167354584,"core_id":0,"die_id":0,"freq_mhz":1198,"scaled_ratio":0.1}],"freq_mhz":1284,"label":"E","scaled_ratio":0.047}],"fans":[{"max_rpm":4900,"name":"fan0","rpm":999}],"gpu_power":0.021198948845267296,"gpu_ram_power":0.0,"memory":{"ram_total":17179869184,"ram_usage":10640392192,"swap_total":0,"swap_usage":0},"ram_power":0.0,"sys_power":19.483932495117188,"temp":{"cpu_temp_avg":38.75801467895508,"gpu_temp_avg":38.63107681274414},"timestamp":"2026-10-30T20:59:15.630084+00:00"}`

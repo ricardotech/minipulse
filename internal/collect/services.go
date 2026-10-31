@@ -14,11 +14,15 @@ import (
 	"github.com/ricardotech/minipulse/internal/model"
 )
 
+// Absolute path, like lsof/scutil below: never resolve system
+// tools through a PATH an attacker-writable directory could lead.
+const launchctlPath = "/bin/launchctl"
+
 // LaunchdServices lists user-domain launchd jobs (`launchctl list`).
 // System com.apple.* jobs are included but the UI filters them by
 // default — a server box cares about the jobs its owner installed.
 func LaunchdServices(ctx context.Context) ([]model.Service, error) {
-	out, err := exec.CommandContext(ctx, "launchctl", "list").Output()
+	out, err := exec.CommandContext(ctx, launchctlPath, "list").Output()
 	if err != nil {
 		return nil, err
 	}
