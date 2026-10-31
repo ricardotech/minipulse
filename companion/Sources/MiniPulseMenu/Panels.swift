@@ -130,14 +130,26 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
             popover.performClose(nil)
         } else {
             // PopoverView.onAppear is the single refresh trigger.
+            // Activating the app makes the popover the key window,
+            // which is what lets Esc reach the local key monitor
+            // below; the previous app is re-activated on close.
+            previousApp = NSWorkspace.shared.frontmostApplication
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
+            popover.contentViewController?.view.window?.makeKey()
             installClickMonitors()
         }
     }
 
     func popoverDidClose(_ notification: Notification) {
         removeClickMonitors()
+        if let previousApp, previousApp != .current, !previousApp.isTerminated {
+            previousApp.activate()
+        }
+        previousApp = nil
     }
+
+    private var previousApp: NSRunningApplication?
 
     // Dismiss on any click outside the popover (Esc too), like
     // every other menu-bar app. The status button is excluded:
@@ -156,10 +168,13 @@ final class StatusItemController: NSObject, NSPopoverDelegate {
                 self.popover.performClose(nil)
             }
         }
+        // Works because togglePopover activated the app: key
+        // events now go to the popover (the key window), so a
+        // local monitor sees Esc without TCC permissions.
         let local = NSEvent.addLocalMonitorForEvents(matching: [.keyDown]) { [weak self] e in
-            if e.keyCode == 53 { // Esc
+            if e.keyCode == 53 {
                 Task { @MainActor in self?.popover.performClose(nil) }
-                return nil
+                return nil // consume the Esc
             }
             return e
         }
